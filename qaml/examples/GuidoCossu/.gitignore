@@ -1,0 +1,19 @@
+/DATA
+/EddieData
+.ipynb_checkpoints/
+.vscode/
+/Reference
+
+## Compiler Python bytecodes
+*.pyc
+
+##### Ignore generated data
+*.png
+*.data*
+
+## Ignore ising data
+state*
+
+trained*
+
+*~
