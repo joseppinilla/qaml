@@ -13,8 +13,8 @@ from rbm import RBM
 BATCH_SIZE = 64
 VISIBLE_UNITS = 784  # 28 x 28 images
 HIDDEN_UNITS = 128
-CD_K = 5
-EPOCHS = 5
+CD_K = 2
+EPOCHS = 10
 
 DATA_FOLDER = 'data/mnist'
 
@@ -96,3 +96,33 @@ print('Result: %d/%d' % (sum(predictions == test_labels), test_labels.shape[0]))
 torch.seed()
 sample = rbm.sample(k=100)
 plt.matshow(sample.view(28, 28))
+
+########## NOISE RECONSTRUCTION ##########
+input_data, label = train_loader.dataset[2]
+corrupt_data = (input_data + torch.randn_like(input_data)*0.2).view(1,VISIBLE_UNITS)
+visible_activations = corrupt_data
+
+for step in range(100):
+    hidden_probabilities = rbm.sample_hidden(visible_activations)
+    visible_probabilities = rbm.sample_visible(hidden_probabilities)
+    visible_activations = (visible_probabilities >= rbm._random_probabilities(rbm.num_visible)).float()
+
+plt.matshow(corrupt_data.view(28, 28))
+plt.matshow(visible_probabilities.view(28, 28))
+
+########## RECONSTRUCTION ##########
+input_data, label = train_loader.dataset[4]
+mask = torch.ones_like(input_data)
+for i in range(0,15):
+    for j in range(0,15):
+        mask[0][j][i] = 0
+plt.matshow(input_data.view(28, 28))
+corrupt_data = (input_data*mask).view(1,VISIBLE_UNITS)
+plt.matshow(corrupt_data.view(28, 28))
+
+visible_activations = corrupt_data
+for step in range(5):
+    hidden_probabilities = rbm.sample_hidden(visible_activations)
+    visible_probabilities = rbm.sample_visible(hidden_probabilities)
+    visible_activations = (visible_probabilities >= rbm._random_probabilities(rbm.num_visible)).float()
+plt.matshow(visible_probabilities.view(28, 28))

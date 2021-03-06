@@ -29,9 +29,13 @@ class RBM():
             self.visible_bias_momentum = self.visible_bias_momentum.cuda()
             self.hidden_bias_momentum = self.hidden_bias_momentum.cuda()
 
-    def sample(self, k=10):
+    def sample(self, input=None, k=10):
 
-        visible_activations = torch.zeros((1,self.num_visible))
+        if input is None:
+            visible_activations = torch.zeros((1,self.num_visible))
+        else:
+            visible_activations = input
+
         for step in range(k):
             hidden_probabilities = self.sample_hidden(visible_activations)
             visible_probabilities = self.sample_visible(hidden_probabilities)
