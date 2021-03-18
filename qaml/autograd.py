@@ -2,9 +2,12 @@ import torch
 import torch.nn.functional as F
 
 # class PersistentConstrastiveDivergence(torch.autograd.Function)
-class ConstrastiveDivergence(torch.autograd.Function):
+#    v_k = 0
+    # @staticmethod
+    # def forward(ctx, input, bias_v, bias_h, weights):
 
-    v_k = 0
+
+class ConstrastiveDivergence(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input, bias_v, bias_h, weights):
@@ -38,27 +41,29 @@ class ConstrastiveDivergence(torch.autograd.Function):
         h_grad = -(p_h_0 - p_h_k)
 
         # for i = 1,...,n, j = 1,...,m do
-        #     p(H_i = 1 | v^{(0)}) - p(H_i = 1 | v^{(k)})
-        W_grad = -(p_h_0.t()*v_0 - p_h_k.t()*v_k)
+        #     p(H_i = 1 | v^{(0)})*v_j^{(0)} - p(H_i = 1 | v^{(k)})*v_j^{(k)}
+        W_grad = -(p_h_0.t().mm(v_0) - p_h_k.t().mm(v_k))
 
         return None, v_grad, h_grad, W_grad
 
-CD = ConstrastiveDivergence
 
-N = 4
-M = 8
-# Create random Tensors to hold input and output
-x = torch.randn(1,N)
-
-# Create random Tensors for weights.
-v = torch.randn(1,N, requires_grad=True)
-h = torch.randn(1,M, requires_grad=True)
-W = torch.randn(M, N, requires_grad=True)
-
-ll = CD.apply(x,v,h,W)
-
-
-ll.backward(retain_graph=True)
-from torchviz import make_dot
-
- make_dot(ll)
+"""
+>>> from torchviz import make_dot
+>>>
+>>> N = 4
+>>> M = 8
+>>> # Create random Tensors to hold input and output
+>>> x = torch.randn(10,N)
+>>>
+>>> # Create random Tensors for weights.
+>>> v = torch.randn(1,N, requires_grad=True)
+>>> h = torch.randn(1,M, requires_grad=True)
+>>> W = torch.randn(M, N, requires_grad=True)
+>>>
+>>> CD = ConstrastiveDivergence()
+>>> ll = CD.apply(x,v,h,W)
+>>>
+>>> ll.backward(retain_graph=True)
+>>>
+>>> make_dot(ll, params= {'v<sub>i</sub>':v,'h<sub>j</sub>':h,'w<sub>ij</sub>':W})
+"""

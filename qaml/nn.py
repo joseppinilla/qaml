@@ -12,11 +12,11 @@ class BoltzmannMachine(torch.nn.Module):
     def __init__(self, V_in, H_out):
         super(BM, self).__init__()
         # Visible linear bias
-        self.bv = torch.nn.Parameter(torch.randn(V_in), requires_grad=True)
+        self.bv = torch.nn.Parameter(torch.ones(V_in)*0.5, requires_grad=True)
         # Hidden linear bias
-        self.bh = torch.nn.Parameter(torch.randn(H_out), requires_grad=True)
+        self.bh = torch.nn.Parameter(torch.zeros(H_out), requires_grad=True)
         # Visible-Hidden quadratic bias
-        self.W = torch.nn.Parameter(torch.randn(H_out, V_in), requires_grad=True)
+        self.W = torch.nn.Parameter(torch.randn(H_out, V_in)*0.1, requires_grad=True) 
 
     def sample(self):
         return

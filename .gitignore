@@ -4,3 +4,5 @@
 *.pt
 
 qaml/data/
+
+qaml.egg-info/

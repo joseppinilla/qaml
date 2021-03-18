@@ -1,2 +1,4 @@
-from autograd import *
-from nn import * 
+import nn
+import autograd
+import datasets
+import optim
