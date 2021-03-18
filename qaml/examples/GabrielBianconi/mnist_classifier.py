@@ -14,8 +14,8 @@ INPUT_SIZE = 784  # 28 x 28 images
 LABEL_SIZE = 10
 VISIBLE_UNITS = INPUT_SIZE + LABEL_SIZE
 HIDDEN_UNITS = 128
-CD_K = 5
-EPOCHS = 10
+CD_K = 2
+EPOCHS = 5
 
 DATA_FOLDER = 'data/mnist'
 
@@ -81,8 +81,6 @@ for i in range(SAMPLES):
     visible_activations = (visible_probabilities >= rbm._random_probabilities(rbm.num_visible)).float()
     data[i] = visible_probabilities[:INPUT_SIZE].view(28,28)
 
-
-
 fig = plt.figure()
 plot = plt.matshow(data[0],fignum=0)
 
@@ -97,7 +95,7 @@ def update(j):
 
 anim = FuncAnimation(fig, update, init_func = init, frames=SAMPLES, interval = 10, blit=True)
 plt.show()
-
+anim.save("./generate_3.gif", "imagemagick")
 
 clamp = torch.nn.functional.one_hot(torch.Tensor([3]).to(torch.int64),10)
 visible_activations =  torch.zeros(VISIBLE_UNITS)
@@ -116,7 +114,7 @@ clamp = test_loader.dataset.data[100].view(INPUT_SIZE)
 print(test_loader.dataset.targets[100])
 plt.matshow(clamp.view(28, 28))
 visible_activations = torch.zeros(VISIBLE_UNITS)
-for step in range(100):
+for step in range(1):
     visible_activations[:INPUT_SIZE] = clamp
     hidden_probabilities = rbm.sample_hidden(visible_activations)
     visible_probabilities = rbm.sample_visible(hidden_probabilities)
