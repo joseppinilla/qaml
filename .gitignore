@@ -3,6 +3,10 @@
 
 *.pt
 
-qaml/data/
+examples/data/
 
 qaml.egg-info/
+
+*.gz
+
+
