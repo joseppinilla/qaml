@@ -150,14 +150,14 @@ test_loader = torch.utils.data.DataLoader(test_dataset)
 LABEL_SIZE = len(train_dataset.classes)
 
 model = torch.nn.Sequential(rbm,
-                            torch.nn.Linear(H,LABEL_SIZE),)
+                            torch.nn.Linear(HIDDEN_SIZE,LABEL_SIZE),)
 loss_fn = torch.nn.MSELoss(reduction='sum')
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 for t in range(10):
     for v_batch, labels_batch in train_loader:
         # Forward pass: compute predicted y by passing x to the model.
-        y_pred = model(v_batch.view(len(v_batch),D_in))
+        y_pred = model(v_batch.view(len(v_batch),DATA_SIZE))
 
         # Compute and print loss.
         loss = loss_fn(y_pred, torch.nn.functional.one_hot(labels_batch,10)*1.0)
@@ -176,7 +176,7 @@ for t in range(10):
 
 count = 0
 for test_data, test_label in test_loader:
-    label_pred = model(test_data.view(1,D_in)).argmax()
+    label_pred = model(test_data.view(1,DATA_SIZE)).argmax()
     if label_pred == test_label:
         count+=1
 print(f"{count}/{len(test_dataset)}")
