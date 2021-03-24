@@ -43,26 +43,20 @@ rbm.train()
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
     for v_batch, labels_batch in train_loader:
-        # Negative LogLikehood from Contrastive divergence
-        # err = CD.apply(v_batch.view(len(v_batch),DATA_SIZE),*rbm.parameters())
 
-        # Positive Phase and Negative Phase from sampler
+        # Positive Phase
         v0 = v_batch.view(len(v_batch),DATA_SIZE)
         prob_h0 = sampler(v0, k=0)
-
+        # Negative Phase
         vk = v0.clone()
         prob_hk = sampler(vk, k=1)
 
-        pos_phase = (v0,prob_h0)
-        neg_phase = (vk,prob_hk)
-
         # Reconstruction error from Contrastive Divergence
-        err = CD.apply(pos_phase, neg_phase, *rbm.parameters())
+        err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
+
         # Do not accumulated gradients
         optimizer.zero_grad()
-
-        # Compute gradient of the likelihood with respect to model parameters
-        # Save graph at last epoch
+        # Compute gradients. Save compute graph at last epoch
         err.backward(retain_graph=(t == EPOCHS-1))
 
         # Update parameters
