@@ -9,16 +9,22 @@ import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
 EPOCHS = 300
+SAMPLES = 1000
 BATCH_SIZE = 500
 # Stochastic Gradient Descent
 learning_rate = 0.1
+weight_decay = 1e-4
+momentum = 0.5
 
 #################################### Input Data ################################
 train_dataset = qaml.datasets.BAS(7,7,transform=torch_transforms.ToTensor())
-train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=True,num_samples=1000)
+train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=True,
+                                               num_samples=SAMPLES)
 train_loader = torch.utils.data.DataLoader(train_dataset,
                                            sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
+
+DATASET_SIZE = SAMPLES*len(train_dataset)
 
 ################################# Model Definition #############################
 DATA_SIZE = len(train_dataset.data[0].flatten())
@@ -28,7 +34,9 @@ HIDDEN_SIZE = 25
 rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
 
 # Set up optimizer
-optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate)
+optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
+                                              weight_decay=weight_decay,
+                                              momentum=momentum)
 
 # Set up training mechanisms
 sampler = qaml.sampler.GibbsSampler(rbm)
@@ -37,6 +45,7 @@ CD = qaml.autograd.ConstrastiveDivergence()
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
+err_log = []
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
     for v_batch, labels_batch in train_loader:
@@ -54,17 +63,18 @@ for t in range(EPOCHS):
         # Do not accumulated gradients
         optimizer.zero_grad()
         # Compute gradients. Save compute graph at last epoch
-        err.backward(retain_graph=(x == EPOCHS-1))
+        err.backward(retain_graph=(t == EPOCHS-1))
 
         # Update parameters
         optimizer.step()
         epoch_error  += err
-
-    print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
+    err_log.append(epoch_error)
+    print(f"Epoch {t} Reconstruction Error = {epoch_error.item()/DATASET_SIZE}")
 
 # Set the model to evaluation mode
 rbm.eval()
 
+plt.plot(err_log)
 ################################## ENERGY ######################################
 
 data_energies = []

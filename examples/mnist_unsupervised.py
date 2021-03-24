@@ -22,6 +22,11 @@ train_dataset = torch_datasets.MNIST(root='./data/', train=True,
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE,
                                            shuffle=True)
 
+test_dataset = torch_datasets.MNIST(root='./data/', train=False,
+                                    transform=torch_transforms.ToTensor(),
+                                    download=True)
+test_loader = torch.utils.data.DataLoader(test_dataset)
+
 ################################# Model Definition #############################
 DATA_SIZE = len(train_dataset.data[0].flatten())
 HIDDEN_SIZE = 128
@@ -77,9 +82,19 @@ from torchviz import make_dot
 make_dot(err)
 
 ################################## ENERGY ######################################
-input_data, _ = train_loader.dataset[22]
-rbm.free_energy(torch.ones(784))
-rbm.free_energy(input_data.view(784))
+data_energies = []
+for img,_ in train_dataset:
+    data_energies.append(rbm.free_energy(img.float().view(rbm.V)).item())
+
+test_energies = []
+for img,_ in test_dataset:
+    test_energies.append(rbm.free_energy(img.float().view(rbm.V)).item())
+
+plt.hist(data_energies, label="Data",bins=100)
+plt.hist(test_energies, label="Test",bins=100)
+plt.ylabel("Count")
+plt.xlabel("Energy")
+plt.legend()
 
 ################################# FEATURES #####################################
 plt.matshow(rbm.bv.detach().view(28, 28))
@@ -136,11 +151,6 @@ for _ in range(3):
 plt.matshow(pV_h.detach().view(28, 28))
 
 ######################## CLASSIFIER
-test_dataset = torch_datasets.MNIST(root='./data/', train=False,
-                                    transform=torch_transforms.ToTensor(),
-                                    download=True)
-test_loader = torch.utils.data.DataLoader(test_dataset)
-
 LABEL_SIZE = len(train_dataset.classes)
 
 model = torch.nn.Sequential(rbm,
