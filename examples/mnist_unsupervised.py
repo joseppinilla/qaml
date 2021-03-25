@@ -39,22 +39,23 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                                               weight_decay=weight_decay,
                                               momentum=momentum)
 # Set up training mechanisms
-sampler = qaml.sampler.GibbsSampler(rbm)
+sampler = qaml.sampler.PersistentGibbsNetworkSampler(rbm, BATCH_SIZE)
 CD = qaml.autograd.ConstrastiveDivergence()
 
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
+err_log = []
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
-    for v_batch, labels_batch in train_loader:
+    for img_batch, labels_batch in train_loader:
+
+        input_data = img_batch.flatten(1)
 
         # Positive Phase
-        v0 = v_batch.view(len(v_batch),DATA_SIZE)
-        prob_h0 = sampler(v0, k=0)
+        v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
-        vk = v0.clone()
-        prob_hk = sampler(vk, k=1)
+        vk, prob_hk = sampler(len(v0), k=1)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -67,14 +68,17 @@ for t in range(EPOCHS):
         # Update parameters
         optimizer.step()
         epoch_error  += err
-
+    err_log.append(epoch_error)
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
+
+plt.plot(err_log)
+plt.ylabel("Reconstruction Error")
+plt.xlabel("Epoch")
 
 # Set the model to evaluation mode
 rbm.eval()
-
-torch.save(rbm,"generative_classifier.pt")
-rbm = torch.load("generative_classifier.pt")
+torch.save(rbm,"mnist_unsupervised.pt")
+# rbm = torch.load("mnist_unsupervised.pt")
 ################################# VISUALIZE ####################################
 
 # Computation Graph
@@ -110,7 +114,7 @@ cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
 
 ########## SAMPLE ##########
 import torch.nn.functional as F
-k=1
+k=5
 input = torch.randn(784)
 for _ in range(k):
     pH_v = torch.sigmoid(F.linear(input, rbm.W, rbm.bh))
@@ -118,7 +122,6 @@ for _ in range(k):
     input.data = pV_h.bernoulli()
 
 plt.matshow(pV_h.detach().view(28, 28))
-
 
 ########## NOISE RECONSTRUCTION ##########
 input_data, label = train_loader.dataset[22]

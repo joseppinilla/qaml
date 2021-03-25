@@ -6,9 +6,9 @@ class BAS(torch.utils.data.Dataset):
     """ Bars And Stripes (BAS) Synthetic Dataset
 
     Args:
-        rows (int):
+        rows (int): Number of rows in the BAS image.
 
-        cols (int):
+        cols (int): Number of columns in the BAS image.
 
         transform (callable, optional): A function/transform that  takes in an PIL image
             and returns a transformed version. E.g, ``transforms.RandomCrop``
@@ -16,15 +16,15 @@ class BAS(torch.utils.data.Dataset):
         target_transform (callable, optional): A function/transform that takes in the
             target and transforms it.
 
-        Example:
+    Example:
 
-            >>> # Using Class method
-            >>> import matplotlib.pyplot as plt
-            >>> img,target = BAS.generate_bars_and_stripes(4,5)
-            >>> fig,axs = plt.subplots(2,len(img)//2)
-            >>> for i,ax in enumerate(axs.flat):
-            >>>     ms = ax.matshow(img[i],vmin=0, vmax=1)
-            >>>     ax.axis('off')
+        >>> # Using Class method
+        >>> import matplotlib.pyplot as plt
+        >>> img,target = BAS.generate_bars_and_stripes(4,5)
+        >>> fig,axs = plt.subplots(2,len(img)//2)
+        >>> for i,ax in enumerate(axs.flat):
+        >>>     ms = ax.matshow(img[i],vmin=0, vmax=1)
+        >>>     ax.axis('off')
     """
 
     def __init__(self, rows, cols, transform=None, target_transform=None):
@@ -52,15 +52,15 @@ class BAS(torch.utils.data.Dataset):
     @classmethod
     def generate_bars_and_stripes(cls, rows, cols):
         """ Generate the full dataset of rows*cols Bars And Stripes (BAS).
-                Args:
+        Args:
 
-                Returns:
+        Returns:
 
-            Implementation based on DDQCL project for benchmarking generative models
-            with shallow gate-level quantum circuits.
+        Implementation based on DDQCL project for benchmarking generative models
+        with shallow gate-level quantum circuits.
 
-            [1] https://github.com/uchukwu/quantopo
-            [2] https://www.nature.com/articles/s41534-019-0157-8
+        [1] https://github.com/uchukwu/quantopo
+        [2] https://www.nature.com/articles/s41534-019-0157-8
         """
         bars = []
         for h in itertools.product([0., 1.], repeat=cols):
@@ -82,8 +82,4 @@ class BAS(torch.utils.data.Dataset):
         labels += [(1.,0.)]*(2**rows-2) # Stripes
         labels += [(1.,1.)] # All ones
 
-        return np.asarray(data,dtype=float), np.asarray(labels,dtype=float)
-
-
-img,target = BAS.generate_bars_and_stripes(7,7)
-len(img)
+        return np.asarray(data,dtype='float32'), np.asarray(labels,dtype='float32')

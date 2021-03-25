@@ -39,7 +39,7 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                                               momentum=momentum)
 
 # Set up training mechanisms
-sampler = qaml.sampler.GibbsSampler(rbm)
+sampler = qaml.sampler.GibbsNetworkSampler(rbm)
 CD = qaml.autograd.ConstrastiveDivergence()
 
 ################################## Model Training ##############################
@@ -48,14 +48,13 @@ rbm.train()
 err_log = []
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
-    for v_batch, labels_batch in train_loader:
+    for img_batch, labels_batch in train_loader:
+        input_data = img_batch.flatten(1)
 
         # Positive Phase
-        v0 = v_batch.view(len(v_batch),DATA_SIZE).float()
-        prob_h0 = sampler(v0, k=0)
+        v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
-        vk = v0.clone()
-        prob_hk = sampler(vk, k=1)
+        vk, prob_hk = sampler(v0.detach(), k=1)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -69,12 +68,17 @@ for t in range(EPOCHS):
         optimizer.step()
         epoch_error  += err
     err_log.append(epoch_error)
-    print(f"Epoch {t} Reconstruction Error = {epoch_error.item()/DATASET_SIZE}")
+    print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
+
+# Error graph
+plt.plot(err_log)
+plt.ylabel("Reconstruction Error")
+plt.xlabel("Epoch")
 
 # Set the model to evaluation mode
 rbm.eval()
-
-plt.plot(err_log)
+torch.save(rbm,"bas_unsupervised.pt")
+# rbm = torch.load("bas_unsupervised.pt")
 ################################## ENERGY ######################################
 
 data_energies = []
@@ -90,7 +94,6 @@ plt.hist(data_energies, label="Data",bins=100)
 plt.ylabel("Count")
 plt.xlabel("Energy")
 plt.legend()
-
 
 ################################## VISUALIZE ###################################
 fig,axs = plt.subplots(5,5)
