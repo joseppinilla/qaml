@@ -53,13 +53,15 @@ class SampleBasedConstrastiveDivergence(torch.autograd.Function):
         # Retrieve positive and negative phase values
         samples_v0, samples_h0, samples_vk, samples_hk = ctx.saved_tensors
 
-        #Batch size
-        S = len(samples_v0)
+        # Data batch size
+        D = len(samples_v0)
+        # Sampleset size
+        S = len(samples_vk)
 
         v_grad = -grad_output*(torch.mean(samples_v0, dim=0) - torch.mean(samples_vk, dim=0))
 
         h_grad = -grad_output*(torch.mean(samples_h0,dim=0) - torch.mean(samples_hk, dim=0))
 
-        W_grad = -grad_output*(samples_h0.t().mm(samples_v0) - samples_hk.t().mm(samples_vk))/S
+        W_grad = -grad_output*(samples_h0.t().mm(samples_v0)/D - samples_hk.t().mm(samples_vk)/S)
 
         return None, None, v_grad, h_grad, W_grad
