@@ -16,6 +16,7 @@ class BoltzmannMachine(torch.nn.Module):
         return self._matrix
 
     def energy(self, visible, hidden):
+        # TODO using matrix
         return
 
     def free_energy(self, input, beta=1.0):
@@ -48,16 +49,16 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H, V)*0.1, requires_grad=True)
 
-    def generate(self, hidden=None, k=1):
-        p_h_k = hidden.clone()
-        for _ in range(k):
-            p_v_k = torch.sigmoid(F.linear(p_h_k, self.W.t(), self.bv))
-            v_k = p_v_k.bernoulli()
-            p_h_k = torch.sigmoid(F.linear(v_k, self.W, self.bh))
-        return v_k
+    def generate(self, hidden):
+        return torch.sigmoid(F.linear(hidden, self.W.t(), self.bv))
 
     def forward(self, input):
         return torch.sigmoid(F.linear(input, self.W, self.bh))
+
+    def energy(self, visible, hidden):
+        linear = torch.dot(visible, self.bv.T) + torch.dot(hidden, self.bh.T)
+        quadratic = torch.dot(torch.inner(visible, self.W), hidden)
+        return linear + quadratic
 
     def free_energy(self, input, beta=1.0):
         """ E(v) = -a \cdot v - \sum_j(\log(1+\exp(b+vW)))_j """

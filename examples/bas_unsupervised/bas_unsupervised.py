@@ -8,16 +8,17 @@ import torchvision.datasets as torch_datasets
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-EPOCHS = 300
+SHAPE = (4,4)
+EPOCHS = 20
 SAMPLES = 1000
-BATCH_SIZE = 500
+BATCH_SIZE = 250
 # Stochastic Gradient Descent
 learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
 #################################### Input Data ################################
-train_dataset = qaml.datasets.BAS(7,7,transform=torch_transforms.ToTensor())
+train_dataset = qaml.datasets.BAS(*SHAPE,transform=torch_transforms.ToTensor())
 train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=True,
                                                num_samples=SAMPLES)
 train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -28,7 +29,7 @@ DATASET_SIZE = SAMPLES*len(train_dataset)
 
 ################################# Model Definition #############################
 DATA_SIZE = len(train_dataset.data[0].flatten())
-HIDDEN_SIZE = 25
+HIDDEN_SIZE = 15
 
 # Specify model with dimensions
 rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
@@ -41,6 +42,8 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
 # Set up training mechanisms
 sampler = qaml.sampler.GibbsNetworkSampler(rbm)
 CD = qaml.autograd.ConstrastiveDivergence()
+sa_sampler = qaml.sampler.SimulatedAnnealingNetworkSampler(rbm)
+CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 
 ################################## Model Training ##############################
 # Set the model to training mode
@@ -55,6 +58,7 @@ for t in range(EPOCHS):
         v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
         vk, prob_hk = sampler(v0.detach(), k=1)
+        # vk, prob_hk = sa_sampler(num_reads=BATCH_SIZE, num_sweeps=10)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -70,10 +74,12 @@ for t in range(EPOCHS):
     err_log.append(epoch_error)
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
 
+
 # Error graph
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
+plt.savefig("err_log.png")
 
 # Set the model to evaluation mode
 rbm.eval()
@@ -94,12 +100,18 @@ plt.hist(data_energies, label="Data",bins=100)
 plt.ylabel("Count")
 plt.xlabel("Energy")
 plt.legend()
+plt.savefig("sa_energies.png")
 
 ################################## VISUALIZE ###################################
-fig,axs = plt.subplots(5,5)
+fig,axs = plt.subplots(3,5)
 for i,ax in enumerate(axs.flat):
-    weight_matrix = rbm.W[i].detach().view(7, 7)
+    weight_matrix = rbm.W[i].detach().view(*SHAPE)
     ms = ax.matshow(weight_matrix, cmap='viridis', vmin=-1, vmax=1)
     ax.axis('off')
 fig.subplots_adjust(wspace=0.0, hspace=0.0)
 cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
+plt.savefig("weights.png")
+
+#################################### SAMPLE ####################################
+sample_v,sample_h = sa_sampler(num_sweeps=1000)
+plt.matshow(sample_v.view(*SHAPE))
