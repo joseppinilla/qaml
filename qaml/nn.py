@@ -56,8 +56,8 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         return torch.sigmoid(F.linear(input, self.W, self.bh))
 
     def energy(self, visible, hidden):
-        linear = torch.dot(visible, self.bv.T) + torch.dot(hidden, self.bh.T)
-        quadratic = torch.dot(torch.inner(visible, self.W), hidden)
+        linear = -torch.dot(visible, self.bv.T) + torch.dot(hidden, self.bh.T)
+        quadratic = -torch.dot(torch.inner(visible, self.W), hidden)
         return linear + quadratic
 
     def free_energy(self, input, beta=1.0):

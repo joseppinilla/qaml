@@ -1,7 +1,7 @@
 import torch
 import dimod
 import warnings
-import torch.nn.functional as F
+import dwave.system
 
 class NetworkSampler(torch.nn.Module):
     def __init__(self, model):
@@ -19,11 +19,11 @@ class NetworkSampler(torch.nn.Module):
         bias_v = self.model.bv.data.numpy()
         bias_h = self.model.bh.data.numpy()
         W = self.model.W.data.numpy()
-        lin_V = {bv: bias for bv,bias in enumerate(bias_v)}
-        lin_H = {bh: bias for bh,bias in enumerate(bias_h)}
+        lin_V = {bv: -bias for bv,bias in enumerate(bias_v)}
+        lin_H = {bh: -bias for bh,bias in enumerate(bias_h)}
 
         linear = {**lin_V,**{self.model.V+j:bh for j,bh in lin_H.items()}}
-        quadratic = {(i,self.model.V+j):W[j][i] for j in lin_H for i in lin_V}
+        quadratic = {(i,self.model.V+j):-W[j][i] for j in lin_H for i in lin_V}
 
         bqm = dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
         return bqm
@@ -90,26 +90,37 @@ class GibbsNetworkSampler(NetworkSampler):
 
 class SimulatedAnnealingNetworkSampler(NetworkSampler,dimod.SimulatedAnnealingSampler):
 
-    bqm = None
-
+    sa_kwargs = {"num_sweeps":10}
 
     def __init__(self, model):
         super(SimulatedAnnealingNetworkSampler, self).__init__(model)
 
-    def forward(self, num_samples=1, **kwargs):
+    def forward(self, num_reads=1, **kwargs):
         bqm = self.binary_quadratic_model
+        self.sa_kwargs.update(kwargs)
+        sampleset = self.sample(bqm,num_reads=num_reads,**self.sa_kwargs)
 
-        samples = self.sample(bqm,**kwargs)
+        sampletensor = torch.Tensor(sampleset.record.sample)
+        samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
-        return samples
+        return samples_v, samples_h
+
+        # expect_values = torch.Tensor(sampleset.record.sample).mean(axis=0)
+        # expect_v, expect_h = expect_values.split([self.model.V,self.model.H])
+        #
+        # return expect_v.repeat((num_reads,1)), expect_h.repeat((num_reads,1))
 
 class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
+
+    dw_kwargs = {'answer_mode':'raw',
+                 'auto_scale':True}
+
     def __init__(self, model):
         super(QuantumAssistedNetworkSampler, self).__init__(model)
 
-    def forward(self):
+    def forward(self,**kwargs):
         bqm = self.binary_quadratic_model
-
-        samples = self.sample(bqm,**kwargs)
+        self.dw_kwargs.update(kwargs)
+        samples = self.sample(bqm,**self.dw_kwargs)
 
         return samples

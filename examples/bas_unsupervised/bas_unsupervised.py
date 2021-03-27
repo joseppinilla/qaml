@@ -10,8 +10,8 @@ import torchvision.transforms as torch_transforms
 ################################# Hyperparameters ##############################
 SHAPE = (4,4)
 EPOCHS = 20
-SAMPLES = 1000
-BATCH_SIZE = 250
+SAMPLES = 250
+BATCH_SIZE = 1
 # Stochastic Gradient Descent
 learning_rate = 0.1
 weight_decay = 1e-4
@@ -43,7 +43,7 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
 sampler = qaml.sampler.GibbsNetworkSampler(rbm)
 CD = qaml.autograd.ConstrastiveDivergence()
 sa_sampler = qaml.sampler.SimulatedAnnealingNetworkSampler(rbm)
-CD = qaml.autograd.SampleBasedConstrastiveDivergence()
+# CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 
 ################################## Model Training ##############################
 # Set the model to training mode
@@ -79,7 +79,7 @@ for t in range(EPOCHS):
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-plt.savefig("err_log.png")
+plt.savefig("gibbs_err_log.png")
 
 # Set the model to evaluation mode
 rbm.eval()
@@ -95,12 +95,19 @@ noise_energies = []
 for _ in range(len(train_dataset)):
     noise_energies.append(rbm.free_energy(torch.rand(rbm.V).bernoulli()).item())
 
-plt.hist(noise_energies,label="Random",bins=100)
-plt.hist(data_energies, label="Data",bins=100)
+model_energies = []
+for _ in range(len(train_dataset)):
+    v,h = sa_sampler(num_reads=1)
+    model_energies.append(rbm.energy(v.flatten(),h.flatten()).item())
+
+hist_kwargs = {'alpha':0.5,'density':True,'bins':100}
+plt.hist(noise_energies,label="Random", **hist_kwargs)
+plt.hist(data_energies, label="Data", **hist_kwargs)
+plt.hist(model_energies, label="Model", **hist_kwargs)
 plt.ylabel("Count")
 plt.xlabel("Energy")
 plt.legend()
-plt.savefig("sa_energies.png")
+plt.savefig("gibbs_energies.png")
 
 ################################## VISUALIZE ###################################
 fig,axs = plt.subplots(3,5)
