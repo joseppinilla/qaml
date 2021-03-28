@@ -11,9 +11,9 @@ import torchvision.transforms as torch_transforms
 SHAPE = (7,7)
 EPOCHS = 10
 SAMPLES = 1000
-BATCH_SIZE = 500
+BATCH_SIZE = 250
 # Stochastic Gradient Descent
-learning_rate = 0.1
+learning_rate = 0.7
 weight_decay = 1e-4
 momentum = 0.5
 
@@ -35,12 +35,22 @@ HIDDEN_SIZE = 25
 rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
 
 # Set up optimizer
-optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
-                                              weight_decay=weight_decay,
-                                              momentum=momentum)
+optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate)
+                                              # weight_decay=weight_decay,
+                                              # momentum=momentum)
 
 # Set up training mechanisms
-sampler = qaml.sampler.GibbsNetworkSampler(rbm)
+import embera
+import minorminer
+
+
+sa_sampler = qaml.sampler.SimulatedAnnealingNetworkSampler(rbm)
+bqm = sa_sampler.binary_quadratic_model
+H = embera.architectures.dwave_collection(chip_id='DW_2000Q_6')[0]
+embedding = minorminer.find_embedding(bqm.quadratic,H)
+embera.draw_architecture_embedding(H,embedding,node_size=10)
+
+sampler = qaml.sampler.QuantumAssistedNetworkSampler(rbm, embedding,solver="DW_2000Q_6")
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 
 ################################## Model Training ##############################
@@ -55,7 +65,7 @@ for t in range(EPOCHS):
         # Positive Phase
         v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
-        vk, prob_hk = sampler(v0.detach(), k=1)
+        vk, prob_hk = sampler(num_reads=1000)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -77,10 +87,6 @@ plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
 plt.savefig("err_log.png")
 
-# Set the model to evaluation mode
-rbm.eval()
-torch.save(rbm,"bas_unsupervised.pt")
-
 ################################## ENERGY ######################################
 
 data_energies = []
@@ -100,7 +106,7 @@ plt.legend()
 plt.savefig("energies.png")
 
 ################################## VISUALIZE ###################################
-fig,axs = plt.subplots(3,5)
+fig,axs = plt.subplots(5,5)
 for i,ax in enumerate(axs.flat):
     weight_matrix = rbm.W[i].detach().view(*SHAPE)
     ms = ax.matshow(weight_matrix, cmap='viridis', vmin=-1, vmax=1)
@@ -110,5 +116,5 @@ cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
 plt.savefig("weights.png")
 
 #################################### SAMPLE ####################################
-sample_v,sample_h = sampler(torch.rand(DATA_SIZE),k=100)
-plt.matshow(sample_v.view(*SHAPE).bernoulli().detach())
+sample_v,sample_h = sampler(num_reads=1, num_spin_reversal_transforms=0)
+plt.matshow(sample_v.view(*SHAPE).detach())
