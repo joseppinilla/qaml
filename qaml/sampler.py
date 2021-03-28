@@ -2,6 +2,7 @@ import torch
 import dimod
 import warnings
 import dwave.system
+import dwave.embedding
 
 class NetworkSampler(torch.nn.Module):
     def __init__(self, model):
@@ -90,37 +91,58 @@ class GibbsNetworkSampler(NetworkSampler):
 
 class SimulatedAnnealingNetworkSampler(NetworkSampler,dimod.SimulatedAnnealingSampler):
 
-    sa_kwargs = {"num_sweeps":10}
+    sa_kwargs = {"num_sweeps":1000}
 
     def __init__(self, model):
-        super(SimulatedAnnealingNetworkSampler, self).__init__(model)
+        NetworkSampler.__init__(self,model)
+        dimod.SimulatedAnnealingSampler.__init__(self)
 
-    def forward(self, num_reads=1, **kwargs):
+    def forward(self, num_reads=100, **kwargs):
         bqm = self.binary_quadratic_model
         self.sa_kwargs.update(kwargs)
         sampleset = self.sample(bqm,num_reads=num_reads,**self.sa_kwargs)
 
-        sampletensor = torch.Tensor(sampleset.record.sample)
+        sampletensor = torch.Tensor(sampleset.record.sample.copy())
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
         return samples_v, samples_h
 
-        # expect_values = torch.Tensor(sampleset.record.sample).mean(axis=0)
-        # expect_v, expect_h = expect_values.split([self.model.V,self.model.H])
-        #
-        # return expect_v.repeat((num_reads,1)), expect_h.repeat((num_reads,1))
-
 class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
-    dw_kwargs = {'answer_mode':'raw',
-                 'auto_scale':True}
+    dw_kwargs = {"answer_mode":'raw', "auto_scale":True,
+                 "num_spin_reversal_transforms":5,
+                 "postprocess":"",
+                 "anneal_schedule": [(0.0,0.0),(0.5,0.5),(1.5,0.5),(2.0,1.0)]}
+    embed_kwargs = {"chain_strength":None, "smear_vartype":None}
+    unembed_kwargs = {"chain_break_method":dwave.embedding.chain_breaks.expectation_value,
+                      "chain_break_fraction":False}
 
-    def __init__(self, model):
-        super(QuantumAssistedNetworkSampler, self).__init__(model)
+    def __init__(self, model, embedding=None,
+                 failover=False, retry_interval=-1, **config):
+        NetworkSampler.__init__(self,model)
+        dwave.system.DWaveSampler.__init__(self,failover,retry_interval,**config)
+        self.embedding = embedding
 
-    def forward(self,**kwargs):
-        bqm = self.binary_quadratic_model
+    def forward(self, num_reads=100,
+                chain_strength=None, smear_vartype=None,
+                **kwargs):
         self.dw_kwargs.update(kwargs)
-        samples = self.sample(bqm,**self.dw_kwargs)
 
-        return samples
+        bqm = self.binary_quadratic_model
+        if self.embedding is not None:
+            source_bqm = bqm.copy()
+            bqm = dwave.embedding.embed_bqm(bqm,self.embedding,
+                                            self.to_networkx_graph(),
+                                            **self.embed_kwargs)
+
+        sampleset = self.sample(bqm,num_reads=num_reads,**self.dw_kwargs)
+
+        if self.embedding is not None:
+            sampleset = dwave.embedding.unembed_sampleset(sampleset,
+                                                          self.embedding,
+                                                          source_bqm,
+                                                          **self.unembed_kwargs)
+
+        sampletensor = torch.Tensor(sampleset.record.sample.copy())
+        samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
+        return samples_v, samples_h

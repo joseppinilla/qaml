@@ -19,10 +19,10 @@ class BoltzmannMachine(torch.nn.Module):
         # TODO using matrix
         return
 
-    def free_energy(self, input, beta=1.0):
+    def free_energy(self, visible, beta=1.0):
         return
 
-    def forward(self, input):
+    def forward(self, visible):
         return
 
 BM = BoltzmannMachine
@@ -52,23 +52,44 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
     def generate(self, hidden):
         return torch.sigmoid(F.linear(hidden, self.W.t(), self.bv))
 
-    def forward(self, input):
-        return torch.sigmoid(F.linear(input, self.W, self.bh))
+    def forward(self, visible):
+        return torch.sigmoid(F.linear(visible, self.W, self.bh))
 
     def energy(self, visible, hidden):
-        linear = -torch.dot(visible, self.bv.T) + torch.dot(hidden, self.bh.T)
-        quadratic = -torch.dot(torch.inner(visible, self.W), hidden)
-        return linear + quadratic
+        linear = torch.dot(visible, self.bv.T) + torch.dot(hidden, self.bh.T)
+        quadratic = torch.dot(torch.inner(visible, self.W), hidden)
+        return -(linear + quadratic)
 
-    def free_energy(self, input, beta=1.0):
-        """ E(v) = -a \cdot v - \sum_j(\log(1+\exp(b+vW)))_j """
+    def free_energy(self, visible, beta=1.0, h_reduction="sum"):
+        """ Also called "effective energy", this expression differs from energy
+        in that the compounded contributions of the hidden units is added to the
+        visible unit contributions.
 
-        visible_contribution = torch.dot(self.bv, input)
+            E(v) = -a \cdot v - \sum_j(\log(1+\exp(b+vW)))_j
 
-        vW_h = F.linear(input, self.W, self.bh)
-        hidden_contribution = torch.sum(F.softplus(vW_h,beta))
+        Args:
+            visible (tensor):
 
-        return -(visible_contribution + hidden_contribution)
+            beta (float):
+
+            h_reduction (string, optional):
+            Default: "mean"
+
+        """
+
+        # Visible contributions
+        first_term = torch.dot(self.bv, visible)
+
+        # Hidden and quadratic contributions
+        vW_h = F.linear(visible, self.W, self.bh)
+        if h_reduction=="sum":
+            second_term = torch.sum(F.softplus(vW_h,beta))
+        elif h_reduction=="mean":
+            second_term = torch.mean(F.softplus(vW_h,beta))
+        else:
+            raise ValueError("Unsupported h reduction")
+
+        return -(first_term + second_term)
 
 RBM = RestrictedBoltzmannMachine
 
@@ -77,7 +98,7 @@ class LimitedBoltzmannMachine(BoltzmannMachine):
     def __init__(self,V_in,H_out):
         pass
 
-    def forward(self, input):
+    def forward(self, visible):
         pass
 
 LBM = LimitedBoltzmannMachine
