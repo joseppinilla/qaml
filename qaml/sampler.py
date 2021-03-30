@@ -109,39 +109,65 @@ class SimulatedAnnealingNetworkSampler(NetworkSampler,dimod.SimulatedAnnealingSa
 
 class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
-    dw_kwargs = {"answer_mode":'raw', "auto_scale":True,
-                 "num_spin_reversal_transforms":5,
-                 "postprocess":"",
-                 "anneal_schedule": [(0.0,0.0),(0.5,0.5),(1.5,0.5),(2.0,1.0)]}
-    embed_kwargs = {"chain_strength":None, "smear_vartype":None}
-    unembed_kwargs = {"chain_break_method":dwave.embedding.chain_breaks.expectation_value,
-                      "chain_break_fraction":False}
+    sample_kwargs = {"answer_mode":'raw',
+                     "num_spin_reversal_transforms":5,
+                     "postprocess":"",
+                     "auto_scale":True,
+                     "anneal_schedule":[(0.0,0.0),(0.5,0.5),(1.5,0.5),(2.0,1.0)]}
+
+    embed_kwargs = {"chain_strength":None,
+                    "smear_vartype":None}
+
+    unembed_kwargs = {"chain_break_fraction":False,
+                      "chain_break_method":dwave.embedding.chain_breaks.expectation_value}
 
     def __init__(self, model, embedding=None,
                  failover=False, retry_interval=-1, **config):
         NetworkSampler.__init__(self,model)
         dwave.system.DWaveSampler.__init__(self,failover,retry_interval,**config)
+        self.networkx_graph = self.to_networkx_graph()
+        self.sampleset = None
+        if embedding is None:
+            import minorminer
+            S = self.binary_quadratic_model.quadratic
+            T = self.networkx_graph
+            embedding = minorminer.find_embedding(S,T)
         self.embedding = embedding
+
+    def embed_bqm(self,**kwargs):
+        embed_kwargs = {**self.embed_kwargs,**kwargs}
+        if self.embedding is None:
+            return self.binary_quadratic_model
+
+        return dwave.embedding.embed_bqm(self.binary_quadratic_model,
+                                         self.embedding,
+                                         self.networkx_graph,
+                                         **embed_kwargs)
+
+
+    def unembed_sampleset(self,**kwargs):
+        unembed_kwargs = {**self.unembed_kwargs,**kwargs}
+        if self.embedding is None:
+            return self.sampleset
+
+        return dwave.embedding.unembed_sampleset(self.sampleset,
+                                                 self.embedding,
+                                                 self.binary_quadratic_model,
+                                                 **unembed_kwargs)
 
     def forward(self, num_reads=100,
                 chain_strength=None, smear_vartype=None,
+                embed_kwargs={}, unembed_kwargs={},
                 **kwargs):
-        self.dw_kwargs.update(kwargs)
+        sample_kwargs = {**self.sample_kwargs,**kwargs}
+        embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
+        unembed_kwargs = {**self.unembed_kwargs,**unembed_kwargs}
 
-        bqm = self.binary_quadratic_model
-        if self.embedding is not None:
-            source_bqm = bqm.copy()
-            bqm = dwave.embedding.embed_bqm(bqm,self.embedding,
-                                            self.to_networkx_graph(),
-                                            **self.embed_kwargs)
+        bqm = self.embed_bqm(**embed_kwargs)
 
-        sampleset = self.sample(bqm,num_reads=num_reads,**self.dw_kwargs)
+        self.sampleset = self.sample(bqm,num_reads=num_reads,**sample_kwargs)
 
-        if self.embedding is not None:
-            sampleset = dwave.embedding.unembed_sampleset(sampleset,
-                                                          self.embedding,
-                                                          source_bqm,
-                                                          **self.unembed_kwargs)
+        sampleset = self.unembed_sampleset(**unembed_kwargs)
 
         sampletensor = torch.Tensor(sampleset.record.sample.copy())
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
