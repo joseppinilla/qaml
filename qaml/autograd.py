@@ -16,8 +16,8 @@ class ConstrastiveDivergence(torch.autograd.Function):
         # Retrieve positive and negative phase values
         v0, prob_h0, prob_vk, prob_hk = ctx.saved_tensors
 
-        # Bath size
-        S = len(v0)
+        # Data batch size
+        D = len(v0)
 
         # for j = 1,...,m do
         #     \Delta a_j += v_j^{0} - v_j^{k}
@@ -29,7 +29,7 @@ class ConstrastiveDivergence(torch.autograd.Function):
 
         # for i = 1,...,n, j = 1,...,m do
         #     \Delta w_{ij} += p(H_i=1|v^{0})*v_j^{0} - p(H_i=1|v^{k})*v_j^{k}
-        W_grad = -grad_output*(prob_h0.t().mm(v0) - prob_hk.t().mm(prob_vk))/S
+        W_grad = -grad_output*(prob_h0.t().mm(v0) - prob_hk.t().mm(prob_vk))/D
 
         return None, None, v_grad, h_grad, W_grad
 
@@ -40,8 +40,8 @@ class SampleBasedConstrastiveDivergence(torch.autograd.Function):
         samples_v0, samples_h0 = pos_phase
         samples_vk, samples_hk = neg_phase
 
-        expect_k = torch.mean(samples_vk, dim=0)
         expect_0 = torch.mean(samples_v0, dim=0)
+        expect_k = torch.mean(samples_vk, dim=0)
 
         # Values for gradient
         ctx.save_for_backward(samples_v0, samples_h0, samples_vk, samples_hk)

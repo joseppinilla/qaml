@@ -45,7 +45,7 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         # Visible linear bias
         self.bv = torch.nn.Parameter(torch.ones(V)*0.5, requires_grad=True)
         # Hidden linear bias
-        self.bh = torch.nn.Parameter(torch.zeros(H), requires_grad=True)
+        self.bh = torch.nn.Parameter(torch.ones(H)*0.5, requires_grad=True)
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H, V)*0.1, requires_grad=True)
 

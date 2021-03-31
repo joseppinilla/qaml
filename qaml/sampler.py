@@ -20,11 +20,12 @@ class NetworkSampler(torch.nn.Module):
         bias_v = self.model.bv.data.numpy()
         bias_h = self.model.bh.data.numpy()
         W = self.model.W.data.numpy()
-        lin_V = {bv: -bias for bv,bias in enumerate(bias_v)}
-        lin_H = {bh: -bias for bh,bias in enumerate(bias_h)}
+
+        lin_V = {bv: -bias.item() for bv,bias in enumerate(bias_v)}
+        lin_H = {bh: -bias.item() for bh,bias in enumerate(bias_h)}
 
         linear = {**lin_V,**{self.model.V+j:bh for j,bh in lin_H.items()}}
-        quadratic = {(i,self.model.V+j):-W[j][i] for j in lin_H for i in lin_V}
+        quadratic = {(i,self.model.V+j):-W[j][i].item() for j in lin_H for i in lin_V}
 
         bqm = dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
         return bqm
@@ -99,8 +100,8 @@ class SimulatedAnnealingNetworkSampler(NetworkSampler,dimod.SimulatedAnnealingSa
 
     def forward(self, num_reads=100, **kwargs):
         bqm = self.binary_quadratic_model
-        self.sa_kwargs.update(kwargs)
-        sampleset = self.sample(bqm,num_reads=num_reads,**self.sa_kwargs)
+        sa_kwargs = {**self.sa_kwargs,**kwargs}
+        sampleset = self.sample(bqm,num_reads=num_reads,**sa_kwargs)
 
         sampletensor = torch.Tensor(sampleset.record.sample.copy())
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
@@ -111,15 +112,14 @@ class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
     sample_kwargs = {"answer_mode":'raw',
                      "num_spin_reversal_transforms":5,
-                     "postprocess":"",
                      "auto_scale":True,
-                     "anneal_schedule":[(0.0,0.0),(0.5,0.5),(1.5,0.5),(2.0,1.0)]}
+                     "anneal_schedule":[(0.0,0.0),(0.5,0.5),(10.5,0.5),(11.0,1.0)]}
 
-    embed_kwargs = {"chain_strength":None,
-                    "smear_vartype":None}
+    embed_kwargs = {"chain_strength":dwave.embedding.chain_strength.scaled,
+                    "smear_vartype":dimod.BINARY}
 
     unembed_kwargs = {"chain_break_fraction":False,
-                      "chain_break_method":dwave.embedding.chain_breaks.expectation_value}
+                      "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
 
     def __init__(self, model, embedding=None,
                  failover=False, retry_interval=-1, **config):
@@ -140,8 +140,8 @@ class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
             return self.binary_quadratic_model
 
         return dwave.embedding.embed_bqm(self.binary_quadratic_model,
-                                         self.embedding,
-                                         self.networkx_graph,
+                                         embedding=self.embedding,
+                                         target_adjacency=self.networkx_graph,
                                          **embed_kwargs)
 
 
@@ -156,7 +156,6 @@ class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
                                                  **unembed_kwargs)
 
     def forward(self, num_reads=100,
-                chain_strength=None, smear_vartype=None,
                 embed_kwargs={}, unembed_kwargs={},
                 **kwargs):
         sample_kwargs = {**self.sample_kwargs,**kwargs}
@@ -171,4 +170,5 @@ class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
         sampletensor = torch.Tensor(sampleset.record.sample.copy())
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
+
         return samples_v, samples_h
