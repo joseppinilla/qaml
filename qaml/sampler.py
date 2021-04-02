@@ -27,8 +27,8 @@ class NetworkSampler(torch.nn.Module):
         linear = {**lin_V,**{self.model.V+j:bh for j,bh in lin_H.items()}}
         quadratic = {(i,self.model.V+j):-W[j][i].item() for j in lin_H for i in lin_V}
 
-        bqm = dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
-        return bqm
+        return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
+
 
     def sample_visible(self):
         try:

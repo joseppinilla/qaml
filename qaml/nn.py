@@ -45,7 +45,7 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         # Visible linear bias
         self.bv = torch.nn.Parameter(torch.ones(V)*0.5, requires_grad=True)
         # Hidden linear bias
-        self.bh = torch.nn.Parameter(torch.ones(H)*0.5, requires_grad=True)
+        self.bh = torch.nn.Parameter(torch.zeros(H), requires_grad=True)
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H, V)*0.1, requires_grad=True)
 
@@ -60,7 +60,7 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         quadratic = torch.dot(torch.inner(visible, self.W), hidden)
         return -(linear + quadratic)
 
-    def free_energy(self, visible, beta=1.0, h_reduction="sum"):
+    def free_energy(self, visible, beta=1.0):
         """ Also called "effective energy", this expression differs from energy
         in that the compounded contributions of the hidden units is added to the
         visible unit contributions.
@@ -72,9 +72,6 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
 
             beta (float):
 
-            h_reduction (string, optional):
-            Default: "mean"
-
         """
 
         # Visible contributions
@@ -82,12 +79,7 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
 
         # Hidden and quadratic contributions
         vW_h = F.linear(visible, self.W, self.bh)
-        if h_reduction=="sum":
-            second_term = torch.sum(F.softplus(vW_h,beta))
-        elif h_reduction=="mean":
-            second_term = torch.mean(F.softplus(vW_h,beta))
-        else:
-            raise ValueError("Unsupported h reduction")
+        second_term = torch.sum(F.softplus(vW_h,beta))
 
         return -(first_term + second_term)
 
