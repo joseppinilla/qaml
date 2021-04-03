@@ -12,7 +12,8 @@ class BoltzmannMachine(torch.nn.Module):
 
     @property
     def matrix(self):
-        #TODO
+        # TODO: The adjacency matrix representation of the BM. This exists
+        # regarless of the topology.
         return self._matrix
 
     def energy(self, visible, hidden):
@@ -20,6 +21,7 @@ class BoltzmannMachine(torch.nn.Module):
         return
 
     def free_energy(self, visible, beta=1.0):
+        # TODO using matrix
         return
 
     def forward(self, visible):
@@ -28,11 +30,12 @@ class BoltzmannMachine(torch.nn.Module):
 BM = BoltzmannMachine
 
 class RestrictedBoltzmannMachine(BoltzmannMachine):
-    r""" Restricted Boltzmann Machine.
+    r"""A Boltzmann Machine with connectivity restricted to only between
+    visible-hidden units.
 
     Args:
-        V (int): The size of visible layer
-        H (int): The size of hidden layer
+        V (int): The size of the visible layer.
+        H (int): The size of the hidden layer.
     """
 
     V : int # Visible nodes
@@ -50,43 +53,57 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         self.W = torch.nn.Parameter(torch.randn(H, V)*0.1, requires_grad=True)
 
     def generate(self, hidden):
+        """Sample from visible. P(V) = σ(HW^T + b) """
         return torch.sigmoid(F.linear(hidden, self.W.t(), self.bv))
 
     def forward(self, visible):
+        """ Sample from hidden. P(H) = σ(VW^T + c) """
         return torch.sigmoid(F.linear(visible, self.W, self.bh))
 
     def energy(self, visible, hidden):
-        linear = torch.dot(visible, self.bv.T) + torch.dot(hidden, self.bh.T)
-        quadratic = torch.dot(torch.inner(visible, self.W), hidden)
-        return -(linear + quadratic)
+        """Compute the Energy of a certain state or batch of states.
+
+                E(v,h) = -bV - cH - VW^TH
+        Args:
+            visible (Tensor):
+
+            hidden (Tensor):
+        """
+        # Visible and Hidden contributions (D,V)·(V,1) + (D,H)·(H,1) -> (D,1)
+        linear = torch.matmul(visible, self.bv.T) + torch.matmul(hidden, self.bh.T)
+        # Quadratic contributions (D,V)·(V,H) -> (D,H)x(1,H) -> (D,H)
+        quadratic = visible.matmul(self.W.T).mul(hidden)
+        # sum_j((D,H)) -> (D,1)
+        return -(linear + torch.sum(quadratic,dim=-1))
 
     def free_energy(self, visible, beta=1.0):
-        """ Also called "effective energy", this expression differs from energy
+        """Also called "effective energy", this expression differs from energy
         in that the compounded contributions of the hidden units is added to the
-        visible unit contributions.
+        visible unit contributions. For one input vector:
 
-            E(v) = -a \cdot v - \sum_j(\log(1+\exp(b+vW)))_j
+            F(v) = -bV - \sum_j(\log(1 + \exp(VW^T + c)))_j
 
         Args:
-            visible (tensor):
+            visible (Tensor): Input vector of size RBM.V
 
             beta (float):
 
         """
-
-        # Visible contributions
-        first_term = torch.dot(self.bv, visible)
-
-        # Hidden and quadratic contributions
+        # Visible contributions (D,V)(1,V) -> (D,1)
+        first_term = torch.matmul(visible,self.bv)
+        # Quadratic contributions (D,V)(H,V)^T  + (1,H) -> (D,H)
         vW_h = F.linear(visible, self.W, self.bh)
-        second_term = torch.sum(F.softplus(vW_h,beta))
+        # Compounded Hidden contributions sum_j(log(exp(1 + (D,H)))) -> (D,1)
+        second_term = torch.sum(F.softplus(vW_h,beta),dim=-1)
 
         return -(first_term + second_term)
 
 RBM = RestrictedBoltzmannMachine
 
 class LimitedBoltzmannMachine(BoltzmannMachine):
-
+    """A Boltzmann Machine with added connections between visible-hidden
+    and hidden-hidden units.
+    """
     def __init__(self,V_in,H_out):
         pass
 
