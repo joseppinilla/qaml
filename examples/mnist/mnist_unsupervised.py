@@ -1,4 +1,8 @@
+# %% markdown
+# RBM unsupervised training example of MNIST using Persistent Contrastive
+# Divergence (PCD-1).
 
+# %%
 import qaml
 import torch
 
@@ -7,14 +11,15 @@ import matplotlib.pyplot as plt
 import torchvision.datasets as torch_datasets
 import torchvision.transforms as torch_transforms
 
+# %%
 ################################# Hyperparameters ##############################
-EPOCHS = 10
+EPOCHS = 5
 BATCH_SIZE = 64
 # Stochastic Gradient Descent
 learning_rate = 1e-3
 weight_decay = 1e-4
 momentum = 0.5
-
+# %%
 #################################### Input Data ################################
 train_dataset = torch_datasets.MNIST(root='./data/', train=True,
                                      transform=torch_transforms.ToTensor(),
@@ -26,7 +31,7 @@ test_dataset = torch_datasets.MNIST(root='./data/', train=False,
                                     transform=torch_transforms.ToTensor(),
                                     download=True)
 test_loader = torch.utils.data.DataLoader(test_dataset)
-
+# %%
 ################################# Model Definition #############################
 DATA_SIZE = len(train_dataset.data[0].flatten())
 HIDDEN_SIZE = 128
@@ -41,7 +46,7 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
 # Set up training mechanisms
 sampler = qaml.sampler.PersistentGibbsNetworkSampler(rbm, BATCH_SIZE)
 CD = qaml.autograd.ConstrastiveDivergence()
-
+# %%
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
@@ -74,17 +79,29 @@ for t in range(EPOCHS):
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-
-# Set the model to evaluation mode
 rbm.eval()
-torch.save(rbm,"mnist_unsupervised.pt")
-# rbm = torch.load("mnist_unsupervised.pt")
-################################# VISUALIZE ####################################
 
+# %%
+################################# VISUALIZE ####################################
 # Computation Graph
 from torchviz import make_dot
 make_dot(err)
 
+# %% raw
+# Option to save for future use
+torch.save(rbm,"mnist_unsupervised.pt")
+
+# %% raw
+# Option to load existing model
+rbm = torch.load("mnist_unsupervised.pt")
+
+# %% markdown
+# Plot the distribution of energies for (a) the training data, (b) the test data
+# (c) a set of random samples of visible configurations. The expected result is
+# to have both (a) and (b) as clusters of lower energy, and (c) as a normal
+# distribution to the right, i.e. high energy.
+
+# %%
 ################################## ENERGY ######################################
 data_energies = []
 for img,_ in train_dataset:
@@ -94,17 +111,29 @@ test_energies = []
 for img,_ in test_dataset:
     test_energies.append(rbm.free_energy(img.float().view(rbm.V)).item())
 
-plt.hist(data_energies, label="Data",bins=100)
-plt.hist(test_energies, label="Test",bins=100)
+rand_energies = []
+for _ in range(len(train_dataset)):
+    rand_energies.append(rbm.free_energy(torch.rand(rbm.V)).item())
+
+plt.hist(data_energies,label="Data",bins=100)
+plt.hist(test_energies,label="Test",bins=100)
+plt.hist(rand_energies,label="Random",bins=100)
 plt.ylabel("Count")
 plt.xlabel("Energy")
 plt.legend()
 
-################################# FEATURES #####################################
+# %% markdown
+# It's sometimes useful to visualize the distribution of linear biases and
+# weights between visible and hidden layers
+
+# %%
+################################# VISIBLE ######################################
 plt.matshow(rbm.bv.detach().view(28, 28))
 plt.colorbar()
 
-fig,axs = plt.subplots(16,8)
+# %%
+################################# WEIGHTS ######################################
+fig,axs = plt.subplots(HIDDEN_SIZE//8,8)
 for i,ax in enumerate(axs.flat):
     weight_matrix = rbm.W[i].detach().view(28, 28)
     ms = ax.matshow(weight_matrix, cmap='viridis', vmin=-1, vmax=1)
@@ -112,48 +141,49 @@ for i,ax in enumerate(axs.flat):
 fig.subplots_adjust(wspace=0.0, hspace=0.0)
 cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
 
-########## SAMPLE ##########
-import torch.nn.functional as F
-k=5
-input = torch.randn(784)
-for _ in range(k):
-    pH_v = torch.sigmoid(F.linear(input, rbm.W, rbm.bh))
-    pV_h = torch.sigmoid(F.linear(pH_v, rbm.W.t(), rbm.bv))
-    input.data = pV_h.bernoulli()
+# %% markdown
+# It's possible to sample from the joint probability of the model and plot the
+# visible units of those samples. This doesn't necessarily sample an image of a
+# number.
 
-plt.matshow(pV_h.detach().view(28, 28))
+# %%
+################################## SAMPLE ######################################
+SAMPLES = 4
+prob_vk,prob_hk = sampler(SAMPLES,k=3,init=torch.rand(BATCH_SIZE,rbm.V)*0.1)
+fig,axs = plt.subplots(1,SAMPLES)
+for ax,vk in zip(axs.flat,prob_vk):
+    ax.matshow(vk.detach().view(28, 28))
+    ax.axis('off')
+fig.subplots_adjust(wspace=0.0, hspace=0.0)
 
-########## NOISE RECONSTRUCTION ##########
-input_data, label = train_loader.dataset[22]
-corrupt_data = (input_data + torch.randn_like(input_data)*0.2).view(784)
+# %%
+############################ NOISE RECONSTRUCTION ##############################
+input_data, label = train_loader.dataset[85] # Random input
+corrupt_data = (input_data + torch.randn_like(input_data)*0.5).view(1,784)
+prob_vk,prob_hk = sampler(1,k=1,init=corrupt_data.clone())
+recon_data = prob_vk.detach()
 
-plt.matshow(corrupt_data.view(28, 28))
-pV_h = corrupt_data
-for _ in range(1):
-    pH_v = torch.sigmoid(F.linear(pV_h, rbm.W, rbm.bh))
-    pV_h = torch.sigmoid(F.linear(pH_v, rbm.W.t(), rbm.bv))
-    input.data = pV_h.bernoulli()
+fig,axs = plt.subplots(1,3)
+axs[0].matshow(input_data.view(28,28))
+axs[1].matshow(corrupt_data.view(28,28))
+axs[2].matshow(recon_data.detach().view(28,28))
 
-plt.matshow(pV_h.detach().view(28, 28))
-
-########## RECONSTRUCTION ##########
+############################## RECONSTRUCTION ##################################
 input_data, label = train_loader.dataset[4]
 mask = torch.ones_like(input_data)
-for i in range(0,15):
+for i in range(0,15): # Is there a nicer way to create random masks?
     for j in range(0,15):
         mask[0][j][i] = 0
-plt.matshow(input_data.view(28, 28))
+
 corrupt_data = (input_data*mask).view(1,784)
-plt.matshow(corrupt_data.view(28, 28))
 
-pV_h = corrupt_data
-for _ in range(3):
-    pH_v = torch.sigmoid(F.linear(pV_h, rbm.W, rbm.bh))
-    pV_h = torch.sigmoid(F.linear(pH_v, rbm.W.t(), rbm.bv))
-    input.data = pV_h.bernoulli()
-plt.matshow(pV_h.detach().view(28, 28))
+prob_vk,prob_hk = sampler(1,k=1,init=corrupt_data.clone())
+fig,axs = plt.subplots(1,3)
+axs[0].matshow(input_data.view(28, 28))
+axs[1].matshow(corrupt_data.view(28, 28))
+axs[2].matshow(prob_vk.detach().view(28, 28))
 
-######################## CLASSIFIER
+############################### CLASSIFIER ####################################
 LABEL_SIZE = len(train_dataset.classes)
 
 model = torch.nn.Sequential(rbm,
@@ -186,4 +216,4 @@ for test_data, test_label in test_loader:
     label_pred = model(test_data.view(1,DATA_SIZE)).argmax()
     if label_pred == test_label:
         count+=1
-print(f"{count}/{len(test_dataset)}")
+print(f"Testing accuracy: {count}/{len(test_dataset)}")

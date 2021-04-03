@@ -29,6 +29,71 @@ class NetworkSampler(torch.nn.Module):
 
         return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
 
+    @property
+    def quantized_bqm(self):
+        self.quantize_prepare(num_bits=8,signed=True)
+        bias_v,bias_h,W = self.quantize_convert()
+
+        lin_V = {bv: -bias.item() for bv,bias in enumerate(bias_v)}
+        lin_H = {bh: -bias.item() for bh,bias in enumerate(bias_h)}
+
+        linear = {**lin_V,**{self.model.V+j:bh for j,bh in lin_H.items()}}
+        quadratic = {(i,self.model.V+j):-W[j][i].item() for j in lin_H for i in lin_V}
+
+        return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
+
+    def quantize_prepare(self, num_bits=8, signed=False):
+        bv = self.model.bv.detach().clone()
+        bh = self.model.bh.detach().clone()
+        W = self.model.W.detach().clone()
+        min_val = min(bv.min(),bh.min(),W.min())
+        max_val = max(bv.max(),bh.max(),W.max())
+
+        if signed:
+            qmin = - 2. ** (num_bits - 1)
+            qmax = 2. ** (num_bits - 1) - 1
+        else:
+            qmin = 0.
+            qmax = 2.**num_bits - 1.
+
+        scale = float((max_val - min_val) / (qmax - qmin))
+
+        zero_point = qmax - max_val / scale
+
+        if zero_point < qmin:
+            zero_point = qmin
+        elif zero_point > qmax:
+            zero_point = qmax
+
+        zero_point = int(zero_point)
+
+        self.quant_bits = num_bits
+        self.quant_scale = scale
+        self.quant_signed = signed
+        self.quant_zero_point = zero_point
+
+    def quantize_convert(self):
+
+        def quant_tensor(x):
+            if self.quant_signed:
+                qmin = - 2. ** (self.quant_bits - 1)
+                qmax = 2. ** (self.quant_bits - 1) - 1
+            else:
+                qmin = 0.
+                qmax = 2.**self.quant_bits - 1.
+
+            q_x = self.quant_zero_point + x / self.quant_scale
+            q_x.clamp_(qmin, qmax).round_()
+            return q_x
+
+        qv = quant_tensor(self.model.bv.detach().clone())
+        qh = quant_tensor(self.model.bh.detach().clone())
+        qW = quant_tensor(self.model.W.detach().clone())
+        return qv,qh,qW
+
+    def dequantize_tensor(self, q_x):
+        return self.quant_scale * (q_x.float() - self.quant_zero_point)
+
 
     def sample_visible(self):
         try:
@@ -59,18 +124,17 @@ class PersistentGibbsNetworkSampler(NetworkSampler):
         super(PersistentGibbsNetworkSampler, self).__init__(model)
         self.prob_v.data = torch.rand(num_chains,model.V)
 
-    def forward(self, num_samples, k=1):
-        vk = self.prob_v
-        prob_hk = self.model(vk)
+    def forward(self, num_samples, k=1, init=None):
+        prob_vk = self.prob_v if init is None else init
+        prob_hk = self.model(prob_vk)
 
         for _ in range(k):
-            prob_vk = self.model.generate(prob_hk)
-            vk.data = prob_vk.bernoulli()
-            prob_hk = self.model.forward(vk)
+            prob_vk.data = self.model.generate(prob_hk)
+            prob_hk = self.model.forward(prob_vk.bernoulli())
 
         self.prob_v.data = prob_vk
         self.prob_h.data = prob_hk
-        return vk[:num_samples], prob_hk[:num_samples]
+        return prob_vk[:num_samples], prob_hk[:num_samples]
 
 class GibbsNetworkSampler(NetworkSampler):
 
@@ -78,16 +142,15 @@ class GibbsNetworkSampler(NetworkSampler):
         super(GibbsNetworkSampler, self).__init__(model)
 
     def forward(self, v0, k=1):
-        vk = v0.clone()
-        prob_hk = self.model(v0)
+        prob_vk = v0.clone()
+        prob_hk = self.model(prob_vk)
 
         for _ in range(k):
-            prob_vk = self.model.generate(prob_hk)
-            vk.data = prob_vk.bernoulli()
-            prob_hk = self.model.forward(vk)
+            prob_vk.data = self.model.generate(prob_hk)
+            prob_hk.data = self.model.forward(prob_vk.bernoulli())
 
-        self.prob_v.data = prob_vk
-        self.prob_h.data = prob_hk
+        self.prob_v.data = prob_vk.data
+        self.prob_h.data = prob_hk.data
         return prob_vk, prob_hk
 
 class SimulatedAnnealingNetworkSampler(NetworkSampler,dimod.SimulatedAnnealingSampler):
@@ -108,7 +171,7 @@ class SimulatedAnnealingNetworkSampler(NetworkSampler,dimod.SimulatedAnnealingSa
 
         return samples_v, samples_h
 
-class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
+class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
     sample_kwargs = {"answer_mode":'raw',
                      "num_spin_reversal_transforms":5,
@@ -134,12 +197,18 @@ class QuantumAssistedNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
             embedding = minorminer.find_embedding(S,T)
         self.embedding = embedding
 
-    def embed_bqm(self,**kwargs):
+    def embed_bqm(self, quantize=False, **kwargs):
         embed_kwargs = {**self.embed_kwargs,**kwargs}
+
+        if quantize:
+            bqm = self.quantized_bqm
+        else:
+            bqm = self.binary_quadratic_model
+
         if self.embedding is None:
             return self.binary_quadratic_model
 
-        return dwave.embedding.embed_bqm(self.binary_quadratic_model,
+        return dwave.embedding.embed_bqm(bqm,
                                          embedding=self.embedding,
                                          target_adjacency=self.networkx_graph,
                                          **embed_kwargs)
