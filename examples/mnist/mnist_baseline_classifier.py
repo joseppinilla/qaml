@@ -63,17 +63,4 @@ for test_data, test_label in test_loader:
     label_pred = model(test_data.view(1,D_in)).argmax()
     if label_pred == test_label:
         count+=1
-count
-
-test = test_loader.dataset.data[77].view(1,784)*1.0
-plt.matshow(test.view(28, 28))
-
-loss
-
-model(test)
-
-model(test).argmax()
-
-from torchviz import make_dot
-
-make_dot(loss)
+print(f"Testing accuracy: {count}/{len(test_dataset)}")
