@@ -64,7 +64,7 @@ for t in range(EPOCHS):
         # Positive Phase
         v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
-        vk, prob_hk = sampler(v0, k=1)
+        vk, prob_hk = sampler(v0, k=2)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -98,3 +98,41 @@ torch.save(rbm,"mnist_unsupervised.pt")
 # %% raw
 # Option to load existing model
 rbm = torch.load("mnist_unsupervised.pt")
+
+# %%
+################################# ANIMATION ####################################
+%matplotlib qt
+from matplotlib.animation import FuncAnimation
+img = torch.zeros(1,DATA_SIZE)
+clamp = torch.nn.functional.one_hot(torch.LongTensor([4]),10)
+img_data = []
+for _ in range(1000):
+    prob_hk = rbm.forward(torch.cat((img,clamp),dim=1).bernoulli())
+    img,label = rbm.generate(prob_hk).split((DATA_SIZE,LABEL_SIZE),dim=1)
+    img_data.append(img.detach().clone().view(28,28).numpy())
+
+fig = plt.figure()
+plot = plt.matshow(img_data[0],fignum=0)
+def init():
+    plot.set_data(img_data[0])
+    return [plot]
+
+def update(j):
+    plot.set_data(img_data[j])
+    return [plot]
+
+anim = FuncAnimation(fig,update,init_func=init,frames=1000,interval=20,blit=True)
+plt.show()
+anim.save("./animation.gif", "imagemagick")
+
+# %%
+############################## CLASSIFICATION ##################################
+count = 0
+for test_data, test_label in test_loader:
+    visible = torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1)
+    vk,_ = sampler(visible,k=1)
+    _, label_pred = vk.split((DATA_SIZE,LABEL_SIZE),dim=1)
+    if label_pred.argmax() == test_label.argmax():
+        count+=1
+
+print(f"Testing accuracy: {count}/{len(test_dataset)}")
