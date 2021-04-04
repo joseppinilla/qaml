@@ -104,7 +104,7 @@ rbm = torch.load("mnist_unsupervised.pt")
 %matplotlib qt
 from matplotlib.animation import FuncAnimation
 img = torch.zeros(1,DATA_SIZE)
-clamp = torch.nn.functional.one_hot(torch.LongTensor([4]),10)
+clamp = torch.nn.functional.one_hot(torch.LongTensor([3]),10)
 img_data = []
 for _ in range(1000):
     prob_hk = rbm.forward(torch.cat((img,clamp),dim=1).bernoulli())
@@ -123,15 +123,14 @@ def update(j):
 
 anim = FuncAnimation(fig,update,init_func=init,frames=1000,interval=20,blit=True)
 plt.show()
-anim.save("./animation.gif", "imagemagick")
+anim.save("./animation.gif","pillow")
 
 # %%
 ############################## CLASSIFICATION ##################################
 count = 0
 for test_data, test_label in test_loader:
-    visible = torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1)
-    vk,_ = sampler(visible,k=1)
-    _, label_pred = vk.split((DATA_SIZE,LABEL_SIZE),dim=1)
+    prob_hk = rbm.forward(torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1))
+    _,label_pred = rbm.generate(prob_hk).split((DATA_SIZE,LABEL_SIZE),dim=1)
     if label_pred.argmax() == test_label.argmax():
         count+=1
 
