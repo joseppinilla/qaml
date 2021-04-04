@@ -4,6 +4,8 @@ import warnings
 import dwave.system
 import dwave.embedding
 
+import numpy as np
+
 class NetworkSampler(torch.nn.Module):
     def __init__(self, model):
         super(NetworkSampler, self).__init__()
@@ -167,6 +169,24 @@ class SimulatedAnnealingNetworkSampler(NetworkSampler,dimod.SimulatedAnnealingSa
         sampleset = self.sample(bqm,num_reads=num_reads,**sa_kwargs)
 
         sampletensor = torch.Tensor(sampleset.record.sample.copy())
+        samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
+
+        return samples_v, samples_h
+
+class ExactNetworkSampler(NetworkSampler,dimod.ExactSolver):
+
+    def __init__(self, model):
+        NetworkSampler.__init__(self,model)
+        dimod.ExactSolver.__init__(self)
+
+    def forward(self, **ex_kwargs):
+        bqm = self.binary_quadratic_model
+        solutions = self.sample(bqm,**ex_kwargs)
+
+        Z = sum(np.exp(-E) for E in solutions.record['energy'])
+        P = [np.exp(-E)/Z for E in solutions.record['energy']]
+        samples = [s for s,p in zip(solutions.record['sample'],P) for _ in range(int(p*100000))]
+        sampletensor = torch.Tensor(samples)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
         return samples_v, samples_h
