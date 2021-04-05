@@ -179,13 +179,20 @@ class ExactNetworkSampler(NetworkSampler,dimod.ExactSolver):
         NetworkSampler.__init__(self,model)
         dimod.ExactSolver.__init__(self)
 
-    def forward(self, **ex_kwargs):
+    def forward(self, num_reads=100, beta=1.0, **ex_kwargs):
+        """
+        Args:
+            beta (float) (default=1.0): Inverse Temperature or 1/(kT) for the
+            Boltzmann distribution p(x) = exp(-beta*E)/Z
+
+        """
         bqm = self.binary_quadratic_model
         solutions = self.sample(bqm,**ex_kwargs)
 
-        Z = sum(np.exp(-E) for E in solutions.record['energy'])
-        P = [np.exp(-E)/Z for E in solutions.record['energy']]
-        samples = [s for s,p in zip(solutions.record['sample'],P) for _ in range(int(p*100000))]
+        Z = sum(np.exp(-beta*E) for E in solutions.record['energy'])
+        P = torch.Tensor([np.exp(-beta*E)/Z for E in solutions.record['energy']])
+        samples = [solutions.record['sample'][i] for i in torch.multinomial(P,num_reads)]
+
         sampletensor = torch.Tensor(samples)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
