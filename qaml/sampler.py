@@ -22,12 +22,13 @@ class NetworkSampler(torch.nn.Module):
         bias_v = self.model.bv.data.numpy()
         bias_h = self.model.bh.data.numpy()
         W = self.model.W.data.numpy()
+        V = self.model.V
 
-        lin_V = {bv: -bias.item() for bv,bias in enumerate(bias_v)}
-        lin_H = {bh: -bias.item() for bh,bias in enumerate(bias_h)}
+        lin_V = {i: -bv.item() for i,bv in enumerate(bias_v)}
+        lin_H = {j: -bh.item() for j,bh in enumerate(bias_h)}
+        linear = {**lin_V,**{V+j: bh for j,bh in lin_H.items()}}
 
-        linear = {**lin_V,**{self.model.V+j:bh for j,bh in lin_H.items()}}
-        quadratic = {(i,self.model.V+j):-W[j][i].item() for j in lin_H for i in lin_V}
+        quadratic = {(i,V+j): -W[j][i].item() for i in lin_V for j in lin_H}
 
         return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
 
@@ -99,17 +100,17 @@ class NetworkSampler(torch.nn.Module):
 
     def sample_visible(self):
         try:
-            return self.prob_vk.bernoulli()
+            return self.prob_v.bernoulli()
         except RuntimeError as e:
-            warnings.warn(f"Invalid probability vector: {self.prob_vk}")
-            return torch.zeros_like(self.prob_vk)
+            warnings.warn(f"Invalid probability vector: {self.prob_v}")
+            return torch.zeros_like(self.prob_v)
 
     def sample_hidden(self):
         try:
-            return self.prob_hk.bernoulli()
+            return self.prob_h.bernoulli()
         except RuntimeError as e:
-            warnings.warn(f"Invalid probability vector: {self.prob_vk}")
-            return torch.zeros_like(self.prob_hk)
+            warnings.warn(f"Invalid probability vector: {self.prob_h}")
+            return torch.zeros_like(self.prob_h)
 
 class PersistentGibbsNetworkSampler(NetworkSampler):
     """ Sampler for Persistent Constrastive Divergence training with k steps.
@@ -119,7 +120,6 @@ class PersistentGibbsNetworkSampler(NetworkSampler):
 
             num_chains (int): PCD keeps N chains at all times. This number must
                 match the batch size.
-
 
     """
     def __init__(self, model, num_chains):
@@ -179,13 +179,8 @@ class ExactNetworkSampler(NetworkSampler,dimod.ExactSolver):
         NetworkSampler.__init__(self,model)
         dimod.ExactSolver.__init__(self)
 
-    def forward(self, num_reads=100, beta=1.0, **ex_kwargs):
-        """
-        Args:
-            beta (float) (default=1.0): Inverse Temperature or 1/(kT) for the
-            Boltzmann distribution p(x) = exp(-beta*E)/Z
-
-        """
+    def forward(self, num_reads=100, **ex_kwargs):
+        beta = self.model.beta
         bqm = self.binary_quadratic_model
         solutions = self.sample(bqm,**ex_kwargs)
 
@@ -251,8 +246,7 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
                                                  self.binary_quadratic_model,
                                                  **unembed_kwargs)
 
-    def forward(self, num_reads=100,
-                embed_kwargs={}, unembed_kwargs={},
+    def forward(self, num_reads=100, embed_kwargs={}, unembed_kwargs={},
                 **kwargs):
         sample_kwargs = {**self.sample_kwargs,**kwargs}
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
