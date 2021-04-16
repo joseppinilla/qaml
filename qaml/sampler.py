@@ -32,72 +32,6 @@ class NetworkSampler(torch.nn.Module):
 
         return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
 
-    @property
-    def quantized_bqm(self):
-        self.quantize_prepare(num_bits=8,signed=True)
-        bias_v,bias_h,W = self.quantize_convert()
-
-        lin_V = {bv: -bias.item() for bv,bias in enumerate(bias_v)}
-        lin_H = {bh: -bias.item() for bh,bias in enumerate(bias_h)}
-
-        linear = {**lin_V,**{self.model.V+j:bh for j,bh in lin_H.items()}}
-        quadratic = {(i,self.model.V+j):-W[j][i].item() for j in lin_H for i in lin_V}
-
-        return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
-
-    def quantize_prepare(self, num_bits=8, signed=False):
-        bv = self.model.bv.detach().clone()
-        bh = self.model.bh.detach().clone()
-        W = self.model.W.detach().clone()
-        min_val = min(bv.min(),bh.min(),W.min())
-        max_val = max(bv.max(),bh.max(),W.max())
-
-        if signed:
-            qmin = - 2. ** (num_bits - 1)
-            qmax = 2. ** (num_bits - 1) - 1
-        else:
-            qmin = 0.
-            qmax = 2.**num_bits - 1.
-
-        scale = float((max_val - min_val) / (qmax - qmin))
-
-        zero_point = qmax - max_val / scale
-
-        if zero_point < qmin:
-            zero_point = qmin
-        elif zero_point > qmax:
-            zero_point = qmax
-
-        zero_point = int(zero_point)
-
-        self.quant_bits = num_bits
-        self.quant_scale = scale
-        self.quant_signed = signed
-        self.quant_zero_point = zero_point
-
-    def quantize_convert(self):
-
-        def quant_tensor(x):
-            if self.quant_signed:
-                qmin = - 2. ** (self.quant_bits - 1)
-                qmax = 2. ** (self.quant_bits - 1) - 1
-            else:
-                qmin = 0.
-                qmax = 2.**self.quant_bits - 1.
-
-            q_x = self.quant_zero_point + x / self.quant_scale
-            q_x.clamp_(qmin, qmax).round_()
-            return q_x
-
-        qv = quant_tensor(self.model.bv.detach().clone())
-        qh = quant_tensor(self.model.bh.detach().clone())
-        qW = quant_tensor(self.model.W.detach().clone())
-        return qv,qh,qW
-
-    def dequantize_tensor(self, q_x):
-        return self.quant_scale * (q_x.float() - self.quant_zero_point)
-
-
     def sample_visible(self):
         try:
             return self.prob_v.bernoulli()
@@ -186,7 +120,7 @@ class ExactNetworkSampler(NetworkSampler,dimod.ExactSolver):
 
         Z = sum(np.exp(-beta*E) for E in solutions.record['energy'])
         P = torch.Tensor([np.exp(-beta*E)/Z for E in solutions.record['energy']])
-        samples = [solutions.record['sample'][i] for i in torch.multinomial(P,num_reads)]
+        samples = [solutions.record['sample'][i] for i in torch.multinomial(P,num_reads,replacement=True)]
 
         sampletensor = torch.Tensor(samples)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
@@ -219,13 +153,10 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
             embedding = minorminer.find_embedding(S,T)
         self.embedding = embedding
 
-    def embed_bqm(self, quantize=False, **kwargs):
+    def embed_bqm(self, **kwargs):
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
-        if quantize:
-            bqm = self.quantized_bqm
-        else:
-            bqm = self.binary_quadratic_model
+        bqm = self.binary_quadratic_model
 
         if self.embedding is None:
             return self.binary_quadratic_model
