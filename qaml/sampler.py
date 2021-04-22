@@ -155,13 +155,10 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
     def embed_bqm(self, **kwargs):
         embed_kwargs = {**self.embed_kwargs,**kwargs}
-
-        bqm = self.binary_quadratic_model
-
         if self.embedding is None:
             return self.binary_quadratic_model
 
-        return dwave.embedding.embed_bqm(bqm,
+        return dwave.embedding.embed_bqm(self.binary_quadratic_model,
                                          embedding=self.embedding,
                                          target_adjacency=self.networkx_graph,
                                          **embed_kwargs)

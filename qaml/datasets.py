@@ -49,12 +49,65 @@ class BAS(torch.utils.data.Dataset):
 
         return img, target
 
+    def __contains__(self, item):
+        if isinstance(item,torch.Tensor):
+            return item.numpy() in self.data
+        elif isinstance(item,np.ndarray):
+            return item in self.data
+        else:
+            raise RuntimeError("Given item isn't torch.Tensor or numpy.ndrray")
+
+    def score(self, samples):
+        """ Given a set of samples, compute the qBAS[1] sampling score:
+                qBAS = 2pr/(p+r)
+            p: precision or number of correct samples over total samples
+            r: recall or number of sampled patterns over total patterns
+
+        Args:
+            samples (list or numpy.ndarray): An iterable of numpy.ndarray values
+                to be compared to the original data in the dataset.
+
+        Returns:
+            precision (float): number of correct samples over total samples
+
+            recall (float): number of sampled patterns over total patterns
+
+            score (float): qBAS score as defined above
+
+        [1] Benedetti, M., et al. A generative modeling approach for
+        benchmarking and training shallow quantum circuits. (2019).
+        https://doi.org/10.1038/s41534-019-0157-8
+        """
+        total_samples = len(samples)
+        total_patterns = len(self)
+
+        def index(item):
+            iter = (i for i,d in enumerate(self.data) if np.array_equiv(d,item))
+            return next(iter,None)
+
+        sampled_patterns = [i for i in map(index,samples) if i is not None]
+        if not sampled_patterns: return 0.0,0.0,0.0
+
+        precision = len(sampled_patterns)/total_samples
+        recall = len(set(sampled_patterns))/total_patterns
+        score = 2.0*precision*recall/(precision+recall)
+
+        return precision, recall, score
+
     @classmethod
     def generate_bars_and_stripes(cls, rows, cols):
         """ Generate the full dataset of rows*cols Bars And Stripes (BAS).
         Args:
+            cols (int): number of columns in the generated images
+
+            rows (int): number of rows in the generated images
 
         Returns:
+            data (numpy.ndarray): Array of (rows,cols) images of BAS dataset
+
+            targets (numpy.ndarray): Array of labels for data. Where the empty
+                (all zeros), bars (vertical lines), stripes (horizontal lines),
+                and full (all ones) images belong to different classes.
 
         Implementation based on DDQCL project for benchmarking generative models
         with shallow gate-level quantum circuits.
@@ -72,14 +125,14 @@ class BAS(torch.utils.data.Dataset):
             pattern = np.repeat([h], cols, 1)
             stripes.append(pattern.reshape(rows,cols))
 
-        data = np.concatenate((bars[:-1], # ignore all ones
-                               stripes[1:]), # ignore all zeros
-                               axis=0)
+        data = np.asarray(np.concatenate((bars[:-1], # ignore all ones
+                                         stripes[1:]), # ignore all zeros
+                                         axis=0),dtype='float32')
 
         # Create labels synthetically
-        labels  = [(1.,1.)] # All zeros
-        labels += [(0.,1.)]*(2**cols-2) # Bars
-        labels += [(1.,0.)]*(2**rows-2) # Stripes
-        labels += [(1.,1.)] # All ones
+        labels  = [0] # All zeros
+        labels += [1]*(2**cols-2) # Bars
+        labels += [2]*(2**rows-2) # Stripes
+        labels += [3] # All ones
 
-        return np.asarray(data,dtype='float32'), np.asarray(labels,dtype='float32')
+        return data, np.asarray(labels,dtype='float32')

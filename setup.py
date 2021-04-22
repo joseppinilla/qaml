@@ -6,8 +6,9 @@ packages = ['qaml']
 
 install_requires = ['networkx',
                     'decorator',
-                    'pulp',
+                    'torch',
                     'dimod',
+                    'numpy',
                     'minorminer',
                     'dwave-networkx']
 
