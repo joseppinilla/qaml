@@ -72,3 +72,30 @@ class SampleBasedConstrastiveDivergence(torch.autograd.Function):
         W_grad = -grad_output*(torch.matmul(samples_h0.T,samples_v0)/D - torch.matmul(samples_hk.T,samples_vk)/S)
 
         return None, None, v_grad, h_grad, W_grad
+
+
+class AdaptiveBeta(torch.autograd.Function):
+    """ Adaptive hyperparameter (beta) updating using the method from [1]. This
+    is useful when dealing with a sampler that has an unknown effective inverse
+    temperature (beta), such as quantum annealers.
+
+    [1] Xu, G., Oates, W.S. Adaptive hyperparameter updating for training
+    restricted Boltzmann machines on quantum annealers. Sci Rep 11, 2727 (2021).
+    https://doi.org/10.1038/s41598-021-82197-1
+    """
+    @staticmethod
+    def forward(ctx, energies_0, energies_k, beta):
+        # Values for gradient
+        energy_avg_0 = torch.mean(energies_0)
+        energy_avg_k = torch.mean(energies_k)
+        ctx.save_for_backward(energy_avg_0,energy_avg_k,beta)
+        return torch.nn.functional.l1_loss(energy_avg_0, energy_avg_k, reduction='sum')
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Retrieve energy average from data and samples
+        energy_avg_0, energy_avg_k, beta = ctx.saved_tensors
+
+        beta_grad = -(energy_avg_0-energy_avg_k)/(beta**2)
+
+        return  None, None, beta_grad
