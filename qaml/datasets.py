@@ -1,5 +1,8 @@
+import os
 import torch
+import requests
 import itertools
+
 import numpy as np
 
 class BAS(torch.utils.data.Dataset):
@@ -136,3 +139,80 @@ class BAS(torch.utils.data.Dataset):
         labels += [3] # All ones
 
         return data, np.asarray(labels,dtype='float32')
+
+import torchvision
+
+class OptDigits(torchvision.datasets.vision.VisionDataset):
+    """ Based on the MNIST Dataset implementation, but enough differences to not
+        make it a subclass.
+    """
+    mirrors = [
+        "https://archive.ics.uci.edu/ml/machine-learning-databases/optdigits/"
+    ]
+
+    resources = [
+        ("optdigits.tra", "268ce7771f3f15afbc54402478b1d454"),
+        ("optdigits.tes", "a0339c30a8a5312a1b6f9e5c719dcce5")
+    ]
+
+    training_file = 'optdigits.tra'
+    test_file = 'optdigits.tes'
+
+    def __init__(self, root, train = True,
+                 transform =None, target_transform = None,
+                 download = False):
+        super(OptDigits, self).__init__(root, transform=transform,
+                                    target_transform=target_transform)
+        self.train = train
+        if download:
+            self.download()
+        self.data, self.targets = self._load_data()
+        self.transform = transform
+        self.target_transform = target_transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        if torch.is_tensor(index):
+            index = index.tolist()
+
+        img, target = self.data[index], self.targets[index]
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
+
+    def _load_data(self):
+        filename = f"optdigits.{'tra' if self.train else 'tes'}"
+        fpath = os.path.join(self.raw_folder, filename)
+        data,targets = np.split(np.genfromtxt(fpath,delimiter=','),[64],1)
+        return data, targets
+
+    @property
+    def raw_folder(self) -> str:
+        return os.path.join(self.root, self.__class__.__name__, 'raw')
+
+    def download(self):
+        os.makedirs(self.raw_folder, exist_ok=True)
+        for filename, md5 in self.resources:
+            fpath = os.path.join(self.raw_folder, filename)
+            if torchvision.datasets.utils.check_integrity(fpath,md5):
+                print("Using downloaded and verified file " + fpath)
+                continue
+            for mirror in self.mirrors:
+                try:
+                    print('Downloading ' + mirror+filename + ' to ' + fpath)
+                    with open(fpath, 'wb') as f:
+                        response = requests.get(mirror+filename)
+                        f.write(response.content)
+                except:
+                    print("Failed download.")
+                    continue
+                if not torchvision.datasets.utils.check_integrity(fpath,md5):
+                    raise RuntimeError("File not found or corrupted.")
+                break
