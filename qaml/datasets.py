@@ -150,17 +150,12 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
         "https://archive.ics.uci.edu/ml/machine-learning-databases/optdigits/"
     ]
 
-    resources = [
-        ("optdigits.tra", "268ce7771f3f15afbc54402478b1d454"),
-        ("optdigits.tes", "a0339c30a8a5312a1b6f9e5c719dcce5")
-    ]
-
-    training_file = 'optdigits.tra'
-    test_file = 'optdigits.tes'
+    training_file = ("optdigits.tra", "268ce7771f3f15afbc54402478b1d454")
+    test_file = ("optdigits.tes", "a0339c30a8a5312a1b6f9e5c719dcce5")
 
     def __init__(self, root, train = True,
-                 transform =None, target_transform = None,
-                 download = False):
+                 transform = None, target_transform = None,
+                 download = True):
         super(OptDigits, self).__init__(root, transform=transform,
                                     target_transform=target_transform)
         self.train = train
@@ -188,10 +183,11 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
         return img, target
 
     def _load_data(self):
-        filename = f"optdigits.{'tra' if self.train else 'tes'}"
+        filename, _ = self.training_file if self.train else self.test_file
         fpath = os.path.join(self.raw_folder, filename)
-        data,targets = np.split(np.genfromtxt(fpath,delimiter=','),[64],1)
-        return data, targets
+        dataset = np.genfromtxt(fpath,delimiter=',',dtype='float32')/16
+        data,targets = np.split(dataset,[64],1)
+        return data.reshape((len(data),8,8)), targets
 
     @property
     def raw_folder(self) -> str:
@@ -199,20 +195,22 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
 
     def download(self):
         os.makedirs(self.raw_folder, exist_ok=True)
-        for filename, md5 in self.resources:
-            fpath = os.path.join(self.raw_folder, filename)
-            if torchvision.datasets.utils.check_integrity(fpath,md5):
-                print("Using downloaded and verified file " + fpath)
+        filename, md5 = self.training_file if self.train else self.test_file
+        fpath = os.path.join(self.raw_folder, filename)
+
+        if torchvision.datasets.utils.check_integrity(fpath,md5):
+            print("Using downloaded and verified file " + fpath)
+            return
+
+        for mirror in self.mirrors:
+            try:
+                print('Downloading ' + mirror+filename + ' to ' + fpath)
+                with open(fpath, 'wb') as f:
+                    response = requests.get(mirror+filename)
+                    f.write(response.content)
+            except:
+                print("Failed download.")
                 continue
-            for mirror in self.mirrors:
-                try:
-                    print('Downloading ' + mirror+filename + ' to ' + fpath)
-                    with open(fpath, 'wb') as f:
-                        response = requests.get(mirror+filename)
-                        f.write(response.content)
-                except:
-                    print("Failed download.")
-                    continue
-                if not torchvision.datasets.utils.check_integrity(fpath,md5):
-                    raise RuntimeError("File not found or corrupted.")
-                break
+            if not torchvision.datasets.utils.check_integrity(fpath,md5):
+                raise RuntimeError("File not found or corrupted.")
+            break
