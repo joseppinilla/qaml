@@ -153,6 +153,9 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
     training_file = ("optdigits.tra", "268ce7771f3f15afbc54402478b1d454")
     test_file = ("optdigits.tes", "a0339c30a8a5312a1b6f9e5c719dcce5")
 
+    classes = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four',
+               '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
+
     def __init__(self, root, train = True,
                  transform = None, target_transform = None,
                  download = True):
@@ -185,9 +188,9 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
     def _load_data(self):
         filename, _ = self.training_file if self.train else self.test_file
         fpath = os.path.join(self.raw_folder, filename)
-        dataset = np.genfromtxt(fpath,delimiter=',',dtype='float32')/16
+        dataset = np.genfromtxt(fpath,delimiter=',',dtype='float32')
         data,targets = np.split(dataset,[64],1)
-        return data.reshape((len(data),8,8)), targets
+        return data.reshape((len(data),8,8))/16, targets
 
     @property
     def raw_folder(self) -> str:
