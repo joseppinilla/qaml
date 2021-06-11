@@ -117,7 +117,7 @@ print(f"Testing accuracy: {count}/{len(test_dataset)} ({count/len(test_dataset):
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-plt.savefig("err_log.png")
+plt.savefig("classical_err_log.png")
 
 # Visible bias graph
 ax = plt.gca()
@@ -126,7 +126,7 @@ lc_v = ax.plot(bv_log)
 plt.legend(iter(lc_v),[f'bv{i}' for i in range(DATA_SIZE)],ncol=2,bbox_to_anchor=(1,1))
 plt.ylabel("Visible Biases")
 plt.xlabel("Epoch")
-plt.savefig("visible_bias_log.png")
+plt.savefig("classical_visible_bias_log.png")
 
 # Hidden bias graph
 ax = plt.gca()
@@ -135,7 +135,7 @@ lc_h = plt.plot(bh_log)
 plt.legend(lc_h,[f'bh{i}' for i in range(HIDDEN_SIZE)],ncol=2,bbox_to_anchor=(1,1))
 plt.ylabel("Hidden Biases")
 plt.xlabel("Epoch")
-plt.savefig("hidden_bias_log.png")
+plt.savefig("classical_hidden_bias_log.png")
 
 # Weights graph
 ax = plt.gca()
@@ -144,13 +144,13 @@ lc_w = plt.plot(W_log)
 plt.legend(lc_w,[f'w{i},{j}' for j in range(HIDDEN_SIZE) for i in range(DATA_SIZE)],ncol=4,bbox_to_anchor=(1,1))
 plt.ylabel("Weights")
 plt.xlabel("Epoch")
-plt.savefig("weights_log.png")
+plt.savefig("classical_weights_log.png")
 
 ################################## ENERGY ######################################
 
 data_energies = []
 for img,label in train_dataset:
-    data = torch.cat((img.flatten(1),label.flatten(1)),1)
+    data = torch.cat((img.flatten(1),label.fla  tten(1)),1)
     data_energies.append(rbm.free_energy(data).item())
 
 rand_data = torch.rand(len(train_dataset)*10,rbm.V)
@@ -160,7 +160,7 @@ gibbs_energies = []
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
 for img,label in train_dataset:
     data = torch.cat((img.flatten(1),label.flatten(1)),1)
-    prob_v,prob_h = gibbs_sampler(data,k=1)
+    prob_v,prob_h = gibbs_sampler(data,k=5)
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
 qa_energies = []
@@ -185,9 +185,7 @@ plt.legend(loc='upper right')
 plt.ylim(0.0,0.05)
 plt.ylabel("Count/Total")
 plt.xlabel("Energy")
-
-plt.savefig("energies.pdf")
-
+plt.savefig("classical_energies.pdf")
 
 ################################## VISUALIZE ###################################
 plt.matshow(rbm.bv.detach()[:DATA_SIZE].view(*SHAPE), cmap='viridis', vmin=-1, vmax=1)
@@ -198,6 +196,5 @@ for i,ax in enumerate(axs.flat):
     weight_matrix = rbm.W[i].detach()[:DATA_SIZE].view(*SHAPE)
     ms = ax.matshow(weight_matrix, cmap='viridis', vmin=-1, vmax=1)
     ax.axis('off')
-# fig.subplots_adjust(wspace=0.0, hspace=0.0)
 cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
-plt.savefig("weights.png")
+plt.savefig("classical_weights.png")

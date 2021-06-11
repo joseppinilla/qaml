@@ -52,13 +52,19 @@ class BAS(torch.utils.data.Dataset):
 
         return img, target
 
-    def __contains__(self, item):
+    def find(self, item):
         if isinstance(item,torch.Tensor):
-            return item.numpy() in self.data
-        elif isinstance(item,np.ndarray):
-            return item in self.data
+            item = item.numpy()
+
+        if isinstance(item,np.ndarray):
+            iter = (i for i,d in enumerate(self.data) if np.array_equiv(d,item))
         else:
             raise RuntimeError("Given item isn't torch.Tensor or numpy.ndrray")
+
+        return next(iter,None)
+
+    def __contains__(self, item):
+        return bool(self.find(item))
 
     def score(self, samples):
         """ Given a set of samples, compute the qBAS[1] sampling score:
@@ -84,11 +90,7 @@ class BAS(torch.utils.data.Dataset):
         total_samples = len(samples)
         total_patterns = len(self)
 
-        def index(item):
-            iter = (i for i,d in enumerate(self.data) if np.array_equiv(d,item))
-            return next(iter,None)
-
-        sampled_patterns = [i for i in map(index,samples) if i is not None]
+        sampled_patterns = [i for i in map(self.find,samples) if i is not None]
         if not sampled_patterns: return 0.0,0.0,0.0
 
         precision = len(sampled_patterns)/total_samples
