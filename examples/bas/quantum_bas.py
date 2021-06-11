@@ -166,36 +166,27 @@ plt.savefig("quantum_bh_log.png")
 
 ################################## ENERGY ######################################
 
+rand_data = torch.rand(len(train_dataset)*10,rbm.V)
+rand_energies = rbm.free_energy(rand_data.bernoulli()).detach().numpy()
+
 data_energies = []
-for img,_ in train_dataset:
-    data_energies.append(rbm.energy(img.view(rbm.V).bernoulli(),rbm(img.view(rbm.V)).bernoulli()).item())
-    # data_energies.append(rbm.free_energy(img.view(rbm.V)).item())
+for img,label in train_dataset:
+    data = img.flatten(1)
+    data_energies.append(rbm.free_energy(data).item())
 
-rand_energies = []
-for _ in range(len(train_dataset)*10):
-    rand_energies.append(rbm.energy(torch.rand(rbm.V).bernoulli(),torch.rand(rbm.H).bernoulli()).item())
-    # rand_energies.append(rbm.free_energy(torch.rand(rbm.V).bernoulli()).item())
-
-model_energies = []
-for v in itertools.product([0, 1], repeat=DATA_SIZE):
-    for h in itertools.product([0, 1], repeat=HIDDEN_SIZE):
-        model_energies.append(rbm.energy(torch.tensor(v,dtype=torch.float),torch.tensor(h,dtype=torch.float)).item())
-    # model_energies.append(rbm.free_energy(torch.tensor(v,dtype=torch.float)).item())
-
-gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
 gibbs_energies = []
-for _ in range(100):
-    for img,_ in train_dataset:
-        prob_v,prob_h = gibbs_sampler(img.float().view(rbm.V),k=1)
-        gibbs_energies.append(rbm.energy(prob_v,prob_h).item())
-        # gibbs_energies.append(rbm.free_energy(prob_v).item())
+gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
+for img,label in train_dataset:
+    data = img.flatten(1)
+    prob_v,prob_h = gibbs_sampler(data,k=5)
+    gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
 qa_energies = []
 qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver="Advantage_system1.1")
 qa_sampleset = qa_sampler(num_reads=1000)
 for s_v,s_h in zip(*qa_sampleset):
-    qa_energies.append(rbm.energy(s_v.detach(),s_h.detach()).item())
-    # qa_energies.append(rbm.free_energy(s_v.detach()).item())
+    qa_energies.append(rbm.free_energy(s_v.detach()).item())
+
 
 import matplotlib
 import numpy as np
@@ -206,31 +197,17 @@ weights = lambda data: np.ones_like(data)/len(data)
 
 plt.hist(rand_energies,weights=weights(rand_energies),label="Random",color='r',**hist_kwargs)
 plt.hist(data_energies,weights=weights(data_energies), label="Data", color='b', **hist_kwargs)
-# plt.hist(ex_energies,weights=weights(ex_energies),label="Exact", color='w',**hist_kwargs)
-# plt.hist(model_energies, weights=weights(model_energies), label="Model", color='r', **hist_kwargs)
-# plt.hist(gibbs_energies,weights=weights(gibbs_energies),label="Gibbs-1",color='g',**hist_kwargs)
+plt.hist(gibbs_energies,weights=weights(gibbs_energies),label="Gibbs-1",color='g',**hist_kwargs)
 plt.hist(qa_energies,weights=weights(qa_energies),label="QA",color='orange', **hist_kwargs)
-# plt.hist(sa_energies,weights=weights(sa_energies),label="SA",color='c',**hist_kwargs)
+
 plt.legend(loc='upper right')
 plt.ylim(0.0,0.05)
 plt.ylabel("Count/Total")
 plt.xlabel("Energy")
-# SAMPLERS
-sax = plt.gca().twinx()
-plt.legend(loc='upper right')
-plt.ylabel("Count/Total")
-plt.xlabel("Energy")
-plt.ylim(0.0,0.11)
-plt.savefig("energies.pdf")
-
-
-ax2.hist(qa_energies, label="QA", **hist_kwargs)
-ax2.plot(t, s2, 'r.')
-plt.ylabel('sin', color='r')
-plt.show()
+plt.savefig("quantum_energies.pdf")
 
 ################################## VISUALIZE ###################################
-plt.matshow(rbm.bv.detach().view(*SHAPE), cmap='viridis', vmin=-1, vmax=1)
+plt.matshow(rbm.bv.detach().view(*SHAPE), cmap='viridis')
 plt.colorbar()
 
 fig,axs = plt.subplots(HIDDEN_SIZE//4,4)
@@ -238,6 +215,6 @@ for i,ax in enumerate(axs.flat):
     weight_matrix = rbm.W[i].detach().view(*SHAPE)
     ms = ax.matshow(weight_matrix, cmap='viridis', vmin=-1, vmax=1)
     ax.axis('off')
-fig.subplots_adjust(wspace=0.0, hspace=0.0)
+fig.subplots_adjust(wspace=0.1, hspace=0.1)
 cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
 plt.savefig("quantum_weights.png")

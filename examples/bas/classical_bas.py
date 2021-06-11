@@ -98,7 +98,7 @@ for img, label in train_dataset:
         masked = clamped + (1-mask)*prob_vk.data
         prob_hk.data = rbm(masked)
         prob_vk.data = rbm.generate(prob_hk)
-    recon = (clamped + (1-mask)*prob_vk>0.2).view(SHAPE)
+    recon = (clamped + (1-mask)*prob_vk.bernoulli()).view(SHAPE)
     if recon in train_dataset:
         count+=1
 
