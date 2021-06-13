@@ -4,14 +4,16 @@ import itertools
 
 import matplotlib.pyplot as plt
 
+import torch.nn.utils.prune as prune
+
 import torchvision.datasets as torch_datasets
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-SHAPE = (7,6)
+SHAPE = (4,4)
 EPOCHS = 2000
 SAMPLES = 1000
-BATCH_SIZE = 250
+BATCH_SIZE = 500
 # Stochastic Gradient Descent
 learning_rate = 0.1
 weight_decay = 1e-4
@@ -29,7 +31,7 @@ DATASET_SIZE = SAMPLES*len(train_dataset)
 
 ################################# Model Definition #############################
 DATA_SIZE = len(train_dataset.data[0].flatten())
-HIDDEN_SIZE = 8
+HIDDEN_SIZE = 16
 
 # Specify model with dimensions
 rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
@@ -80,26 +82,27 @@ for t in range(EPOCHS):
 
 ################################# qBAS Score ###################################
 N = 1000
-prob_v,_ = gibbs_sampler(torch.rand(N,DATA_SIZE),k=100)
-plt.matshow(prob_v[11].view(*SHAPE).detach()); plt.colorbar()
-p,r,score = train_dataset.score(prob_v.view(N,*SHAPE)>0.4)
+prob_v,_ = gibbs_sampler(torch.rand(N,DATA_SIZE),k=10)
+plt.matshow(prob_v[0].view(*SHAPE).detach().bernoulli()); plt.colorbar()
+p,r,score = train_dataset.score(prob_v.view(N,*SHAPE).bernoulli())
 print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 
 ############################## RECONSTRUCTION ##################################
-k = 100
+k = 10
 count = 0
-mask = torch_transforms.F.erase(torch.ones(SHAPE),1,1,5,4,0).flatten()
+mask = torch_transforms.F.erase(torch.ones(SHAPE),1,1,2,2,0).flatten()
 for img, label in train_dataset:
 
     clamped = mask*img.flatten(1)
-    prob_hk = rbm(clamped)
+    prob_hk = rbm.forward(clamped + (1-mask)*0.5)
     prob_vk = rbm.generate(prob_hk).detach()
     for _ in range(k):
         masked = clamped + (1-mask)*prob_vk.data
-        prob_hk.data = rbm(masked)
-        prob_vk.data = rbm.generate(prob_hk)
-    recon = (clamped + (1-mask)*prob_vk.bernoulli()).view(SHAPE)
-    if recon in train_dataset:
+        prob_hk.data = rbm.forward(masked).data
+        prob_vk.data = rbm.generate(prob_hk).data
+    recon = (clamped + (1-mask)*prob_vk).bernoulli().view(img.shape)
+
+    if recon.equal(img):
         count+=1
 
 print(f"Dataset Reconstruction: {count/len(train_dataset):.02}")
@@ -159,7 +162,6 @@ for s_v,s_h in zip(*qa_sampleset):
 
 import matplotlib
 import numpy as np
-%matplotlib qt
 hist_kwargs = {'ec':'k','lw':2.0,'alpha':0.5,'histtype':'stepfilled','bins':100}
 matplotlib.rcParams.update({'font.size': 22})
 weights = lambda data: np.ones_like(data)/len(data)
@@ -179,7 +181,6 @@ plt.savefig("classical_energies.pdf")
 plt.matshow(rbm.bv.detach().view(*SHAPE), cmap='viridis')
 plt.colorbar()
 
-%matplotlib qt
 fig,axs = plt.subplots(HIDDEN_SIZE//4,4)
 for i,ax in enumerate(axs.flat):
     weight_matrix = rbm.W[i].detach().view(*SHAPE)
