@@ -1,16 +1,21 @@
+# %% markdown
+# # CLassical RBM training on the Bars-And-Stripes Dataset for Reconstruction
+# This is an example on classical Gibbs training of an RBM on the BAS(4,4)
+# dataset.
+# Developed by: Jose Pinilla
+# %%
+# Required packages
 import qaml
 import torch
-import itertools
 
 import matplotlib.pyplot as plt
-
-import torch.nn.utils.prune as prune
-
-import torchvision.datasets as torch_datasets
 import torchvision.transforms as torch_transforms
 
+# %%
 ################################# Hyperparameters ##############################
 SHAPE = (4,4)
+DATA_SIZE = 4*4
+HIDDEN_SIZE = 16
 EPOCHS = 2000
 SAMPLES = 1000
 BATCH_SIZE = 500
@@ -19,6 +24,7 @@ learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
+# %%
 #################################### Input Data ################################
 train_dataset = qaml.datasets.BAS(*SHAPE,transform=torch_transforms.ToTensor())
 train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=True,
@@ -27,29 +33,34 @@ train_loader = torch.utils.data.DataLoader(train_dataset,
                                            sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
 
-DATASET_SIZE = SAMPLES*len(train_dataset)
+# PLot all data
+len(train_dataset)
+fig,axs = plt.subplots(6,5)
+for ax,(img,label) in zip(axs.flat,train_dataset):
+    ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
+plt.tight_layout()
 
+# %%
 ################################# Model Definition #############################
-DATA_SIZE = len(train_dataset.data[0].flatten())
-HIDDEN_SIZE = 16
-
 # Specify model with dimensions
 rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
-                                              weight_decay=weight_decay,
-                                              momentum=momentum)
+                            weight_decay=weight_decay,
+                            momentum=momentum)
 
 # Set up training mechanisms
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
 CD = qaml.autograd.ConstrastiveDivergence()
+
+# %%
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
 err_log = []
-bv_log = [rbm.bv.detach().clone().numpy()]
-bh_log = [rbm.bh.detach().clone().numpy()]
+b_log = [rbm.b.detach().clone().numpy()]
+c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
@@ -67,30 +78,43 @@ for t in range(EPOCHS):
         # Do not accumulated gradients
         optimizer.zero_grad()
         # Compute gradients. Save compute graph at last epoch
-        err.backward(retain_graph=(t == EPOCHS-1))
+        err.backward()
 
         # Update parameters
         optimizer.step()
+
+        #Accumulate error for this epoch
         epoch_error  += err
+
     # Error Log
-    bv_log.append(rbm.bv.detach().clone().numpy())
-    bh_log.append(rbm.bh.detach().clone().numpy())
+    b_log.append(rbm.b.detach().clone().numpy())
+    c_log.append(rbm.c.detach().clone().numpy())
     W_log.append(rbm.W.detach().clone().numpy().flatten())
     err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
+# Set the model to evaluation mode
+rbm.eval()
 
-
-################################# qBAS Score ###################################
+# %%
+################################## Sampling ####################################
 N = 1000
 prob_v,_ = gibbs_sampler(torch.rand(N,DATA_SIZE),k=10)
-plt.matshow(prob_v[0].view(*SHAPE).detach().bernoulli()); plt.colorbar()
-p,r,score = train_dataset.score(prob_v.view(N,*SHAPE).bernoulli())
+img_samples = prob_v.view(N,*SHAPE).bernoulli()
+# PLot some samples
+fig,axs = plt.subplots(4,5)
+for ax,img in zip(axs.flat,img_samples):
+    ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
+plt.tight_layout()
+# Get and print score
+p,r,score = train_dataset.score(img_samples)
 print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 
+# %%
 ############################## RECONSTRUCTION ##################################
 k = 10
 count = 0
-mask = torch_transforms.F.erase(torch.ones(SHAPE),1,1,2,2,0).flatten()
+
+mask = torch_transforms.functional.erase(torch.ones(1,*SHAPE),i=1,j=1,h=2,w=2,v=0).flatten()
 for img, label in train_dataset:
 
     clamped = mask*img.flatten(1)
@@ -104,47 +128,47 @@ for img, label in train_dataset:
 
     if recon.equal(img):
         count+=1
-
 print(f"Dataset Reconstruction: {count/len(train_dataset):.02}")
 
+# %%
 ############################ MODEL VISUALIZATION ###############################
 
-# Set the model to evaluation mode
-rbm.eval()
-torch.save(rbm,"classical_bas.pt")
-# rbm = torch.load("classical_bas.pt")
 # Error graph
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-plt.savefig("classical_err_log.png")
+plt.savefig("classical_err_log.pdf")
 
 # Visible bias graph
 ax = plt.gca()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',DATA_SIZE).colors))
-lc_v = ax.plot(bv_log)
-plt.legend(iter(lc_v),[f'bv{i}' for i in range(DATA_SIZE)],ncol=4,bbox_to_anchor=(1,1))
+lc_v = ax.plot(b_log)
+plt.legend(lc_v,[f'b{i}' for i in range(DATA_SIZE)],ncol=4,loc=(0,1))
 plt.ylabel("Visible Biases")
 plt.xlabel("Epoch")
-plt.savefig("classival_bv_log.png")
+plt.savefig("classival_b_log.pdf")
 
 # Hidden bias graph
 ax = plt.gca()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE).colors))
-lc_h = plt.plot(bh_log)
-plt.legend(lc_h,[f'bh{i}' for i in range(HIDDEN_SIZE)],ncol=2,bbox_to_anchor=(1,1))
+lc_h = plt.plot(c_log)
+plt.legend(lc_h,[f'c{i}' for i in range(HIDDEN_SIZE)],ncol=4,loc=(0,1))
 plt.ylabel("Hidden Biases")
 plt.xlabel("Epoch")
-plt.savefig("classical_bh_log.png")
+plt.savefig("classical_c_log.pdf")
 
+# %%
 ################################## ENERGY ######################################
-rand_data = torch.rand(len(train_dataset)*10,rbm.V)
-rand_energies = rbm.free_energy(rand_data.bernoulli()).detach().numpy()
 
 data_energies = []
 for img,label in train_dataset:
     data = img.flatten(1)
     data_energies.append(rbm.free_energy(data).item())
+
+rand_energies = []
+rand_data = torch.rand(len(train_dataset)*10,rbm.V)
+for img in rand_data:
+    rand_energies.append(rbm.free_energy(img.bernoulli()).item())
 
 gibbs_energies = []
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
@@ -153,39 +177,41 @@ for img,label in train_dataset:
     prob_v,prob_h = gibbs_sampler(data,k=5)
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
+
 qa_energies = []
-qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver="Advantage_system1.1")
+solver_name = "Advantage_system1.1"
+qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver=solver_name)
 qa_sampleset = qa_sampler(num_reads=1000)
 for s_v,s_h in zip(*qa_sampleset):
     qa_energies.append(rbm.free_energy(s_v.detach()).item())
 
+plot_data = [(data_energies,  'Data',    'blue'),
+             (rand_energies,  'Random',  'red'),
+             (gibbs_energies, 'Gibbs-5', 'green'),
+             (qa_energies,    'Quantum', 'orange')]
 
-import matplotlib
-import numpy as np
 hist_kwargs = {'ec':'k','lw':2.0,'alpha':0.5,'histtype':'stepfilled','bins':100}
-matplotlib.rcParams.update({'font.size': 22})
-weights = lambda data: np.ones_like(data)/len(data)
+weights = lambda data: [1./len(data) for _ in data]
 
-plt.hist(rand_energies,weights=weights(rand_energies),label="Random",color='r',**hist_kwargs)
-plt.hist(data_energies,weights=weights(data_energies), label="Data", color='b', **hist_kwargs)
-plt.hist(gibbs_energies,weights=weights(gibbs_energies),label="Gibbs-1",color='g',**hist_kwargs)
-plt.hist(qa_energies,weights=weights(qa_energies),label="QA",color='orange', **hist_kwargs)
+for data,name,color in plot_data:
+    plt.hist(data,weights=weights(data),label=name,color=color,**hist_kwargs)
 
-plt.legend(loc='upper right')
-plt.ylim(0.0,0.05)
-plt.ylabel("Count/Total")
 plt.xlabel("Energy")
+plt.ylabel("Count/Total")
+plt.legend(loc='upper right')
 plt.savefig("classical_energies.pdf")
 
+# %%
 ################################## VISUALIZE ###################################
-plt.matshow(rbm.bv.detach().view(*SHAPE), cmap='viridis')
+plt.matshow(rbm.b.detach().view(*SHAPE), cmap='viridis')
 plt.colorbar()
+plt.savefig("classical_b.pdf")
 
 fig,axs = plt.subplots(HIDDEN_SIZE//4,4)
 for i,ax in enumerate(axs.flat):
     weight_matrix = rbm.W[i].detach().view(*SHAPE)
-    ms = ax.matshow(weight_matrix, cmap='viridis', vmin=-1, vmax=1)
+    ms = ax.matshow(weight_matrix, cmap='viridis')
     ax.axis('off')
 fig.subplots_adjust(wspace=0.1, hspace=0.1)
 cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
-plt.savefig("classical_weights.png")
+plt.savefig("classical_weights.pdf")

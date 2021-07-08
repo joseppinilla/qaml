@@ -1,6 +1,7 @@
 import torch
 import dimod
 import warnings
+import minorminer
 import dwave.system
 import dwave.embedding
 
@@ -18,15 +19,32 @@ class NetworkSampler(torch.nn.Module):
         self.prob_h = torch.nn.Parameter(hidden_unknown, requires_grad=False)
 
     @property
+    def scaling_factor(self):
+
+        h_range = self.properties['h_range']
+        J_range = self.properties['j_range']
+
+        bqm = self.binary_quadratic_model
+        h = bqm.linear
+        J = bqm.quadratic
+
+        alpha = max( max(h.max()/max(h_range),0),
+                max(h.min()/min(h_range),0),
+                max(J.max()/max(J_range),0),
+                max(J.min()/min(J_range),0))
+
+        return 1.0/alpha
+
+    @property
     def binary_quadratic_model(self):
-        bias_v = self.model.bv.data.numpy()
-        bias_h = self.model.bh.data.numpy()
+        bias_v = self.model.b.data.numpy()
+        bias_h = self.model.c.data.numpy()
         W = self.model.W.data.numpy()
         V = self.model.V
 
-        lin_V = {i: -bv.item() for i,bv in enumerate(bias_v)}
-        lin_H = {j: -bh.item() for j,bh in enumerate(bias_h)}
-        linear = {**lin_V,**{V+j: bh for j,bh in lin_H.items()}}
+        lin_V = {i: -b.item() for i,b in enumerate(bias_v)}
+        lin_H = {j: -c.item() for j,c in enumerate(bias_h)}
+        linear = {**lin_V,**{V+j: c for j,c in lin_H.items()}}
 
         quadratic = {(i,V+j): -W[j][i].item() for i in lin_V for j in lin_H}
 
@@ -130,11 +148,12 @@ class ExactNetworkSampler(NetworkSampler,dimod.ExactSolver):
 class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
     sample_kwargs = {"answer_mode":'raw',
-                     "num_spin_reversal_transforms":5,
-                     "auto_scale":True,
+                     "num_spin_reversal_transforms":0,
+                     "auto_scale":False,
                      "anneal_schedule":[(0.0,0.0),(0.5,0.5),(10.5,0.5),(11.0,1.0)]}
 
-    embed_kwargs = {"chain_strength":dwave.embedding.chain_strength.scaled,
+    embed_kwargs = {"chain_strength":1.6,
+                    #"chain_strength":dwave.embedding.chain_strength.scaled,
                     "smear_vartype":dimod.BINARY}
 
     unembed_kwargs = {"chain_break_fraction":False,
@@ -147,18 +166,38 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
         self.networkx_graph = self.to_networkx_graph()
         self.sampleset = None
         if embedding is None:
-            import minorminer
-            S = self.binary_quadratic_model.quadratic
             T = self.networkx_graph
-            embedding = minorminer.find_embedding(S,T)
+            if 'Restricted' in repr(self.model):
+                cache = minorminer.busclique.busgraph_cache(T)
+                embedding = cache.find_biclique_embedding(model.V,model.H)
+            else:
+                S = self.binary_quadratic_model.quadratic
+                embedding = minorminer.find_embedding(S,T)
         self.embedding = embedding
 
-    def embed_bqm(self, **kwargs):
+    def embed_bqm(self, visible=None, hidden=None, **kwargs):
         embed_kwargs = {**self.embed_kwargs,**kwargs}
-        if self.embedding is None:
-            return self.binary_quadratic_model
 
-        return dwave.embedding.embed_bqm(self.binary_quadratic_model,
+        bqm = self.binary_quadratic_model
+
+        bqm.scale(self.scaling_factor)
+        bqm.scale(1.0/self.model.beta)
+
+        max_linear = max(bqm.linear.values())
+
+        # TODO: This may be done better using an auxiliary "clamped" node
+        if visible is not None:
+            for v,bias in enumerate(visible):
+                bqm.set_linear(v,bias.item()*max_linear*2)
+
+        if hidden is not None:
+            for h,bias in enumerate(hidden,start=self.model.V):
+                bqm.set_linear(h,bias.item()*max_linear*2)
+
+        if self.embedding is None:
+            return bqm
+
+        return dwave.embedding.embed_bqm(bqm,
                                          embedding=self.embedding,
                                          target_adjacency=self.networkx_graph,
                                          **embed_kwargs)
@@ -174,19 +213,19 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
                                                  self.binary_quadratic_model,
                                                  **unembed_kwargs)
 
-    def forward(self, num_reads=100, embed_kwargs={}, unembed_kwargs={},
-                **kwargs):
+    def forward(self, visible=None, hidden=None, num_reads=100,
+                embed_kwargs={}, unembed_kwargs={}, **kwargs):
         sample_kwargs = {**self.sample_kwargs,**kwargs}
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
         unembed_kwargs = {**self.unembed_kwargs,**unembed_kwargs}
 
-        bqm = self.embed_bqm(**embed_kwargs)
+        bqm = self.embed_bqm(visible,hidden,**embed_kwargs)
 
         self.sampleset = self.sample(bqm,num_reads=num_reads,**sample_kwargs)
 
         sampleset = self.unembed_sampleset(**unembed_kwargs)
 
-        sampletensor = torch.Tensor(sampleset.record.sample.copy())
+        sampletensor = torch.tensor(sampleset.record.sample,dtype=torch.float32)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
         return samples_v, samples_h

@@ -10,3 +10,7 @@ data/
 qaml/examples/
 
 examples/workbench.py
+
+build/
+
+dist/

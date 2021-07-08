@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
 ################################# Hyperparameters ##############################
 SHAPE = (8,8)
-EPOCHS = 50
+EPOCHS = 75
 BATCH_SIZE = 1024
 # Stochastic Gradient Descent
 learning_rate = 0.1
@@ -20,7 +20,7 @@ train_dataset = qaml.datasets.OptDigits(root='./data/', train=True,
                                      torch_transforms.ToTensor(),#]),
                                      lambda x:(x>0.6).to(x.dtype)]), #Binarize
                                      target_transform=torch_transforms.Compose([
-                                     lambda x:torch.LongTensor([x]),
+                                     lambda x:torch.LongTensor([int(x)]),
                                      lambda x:torch.nn.functional.one_hot(x-1,4)]),
                                      download=True)
 
@@ -36,7 +36,7 @@ test_dataset = qaml.datasets.OptDigits(root='./data/', train=False,
                                     torch_transforms.ToTensor(),#]),
                                     lambda x:(x>0.6).to(x.dtype)]), #Binarize
                                     target_transform=torch_transforms.Compose([
-                                    lambda x:torch.LongTensor([x]),
+                                    lambda x:torch.LongTensor([int(x)]),
                                     lambda x:torch.nn.functional.one_hot(x-1,4)]),
                                     download=True)
 test_dataset.classes = test_dataset.classes[1:5]
@@ -70,8 +70,8 @@ CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 # Set the model to training mode
 rbm.train()
 err_log = []
-bv_log = [rbm.bv.detach().clone().numpy()]
-bh_log = [rbm.bh.detach().clone().numpy()]
+b_log = [rbm.b.detach().clone().numpy()]
+c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
@@ -96,20 +96,20 @@ for t in range(EPOCHS):
         epoch_error  += err
 
     # Error Log
-    bv_log.append(rbm.bv.detach().clone().numpy())
-    bh_log.append(rbm.bh.detach().clone().numpy())
+    b_log.append(rbm.b.detach().clone().numpy())
+    c_log.append(rbm.c.detach().clone().numpy())
     W_log.append(rbm.W.detach().clone().numpy().flatten())
     err_log.append(epoch_error)
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
 
-############################## CLASSIFICATION ##################################
-count = 0
-for i,(test_data, test_label) in enumerate(test_loader,start=10):
-    prob_hk = rbm(torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1))
-    _,label_pred = rbm.generate(prob_hk).split((DATA_SIZE,LABEL_SIZE),dim=1)
-    if label_pred.argmax() == test_label.argmax():
-        count+=1
-print(f"Testing accuracy: {count}/{len(test_dataset)} ({count/len(test_dataset):.2f})")
+    ############################## CLASSIFICATION ##################################
+    count = 0
+    for i,(test_data, test_label) in enumerate(test_loader,start=10):
+        prob_hk = rbm(torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1))
+        _,label_pred = rbm.generate(prob_hk).split((DATA_SIZE,LABEL_SIZE),dim=1)
+        if label_pred.argmax() == test_label.argmax():
+            count+=1
+    print(f"Testing accuracy: {count}/{len(test_dataset)} ({count/len(test_dataset):.2f})")
 
  # Set the model to evaluation mode
 
@@ -117,25 +117,25 @@ print(f"Testing accuracy: {count}/{len(test_dataset)} ({count/len(test_dataset):
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-plt.savefig("classical_err_log.png")
+plt.savefig("classical_err_log.pdf")
 
 # Visible bias graph
 ax = plt.gca()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',DATA_SIZE).colors))
-lc_v = ax.plot(bv_log)
-plt.legend(iter(lc_v),[f'bv{i}' for i in range(DATA_SIZE)],ncol=2,bbox_to_anchor=(1,1))
+lc_v = ax.plot(b_log)
+plt.legend(iter(lc_v),[f'b{i}' for i in range(DATA_SIZE)],ncol=2,bbox_to_anchor=(1,1))
 plt.ylabel("Visible Biases")
 plt.xlabel("Epoch")
-plt.savefig("classical_visible_bias_log.png")
+plt.savefig("classical_visible_bias_log.pdf")
 
 # Hidden bias graph
 ax = plt.gca()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE).colors))
-lc_h = plt.plot(bh_log)
-plt.legend(lc_h,[f'bh{i}' for i in range(HIDDEN_SIZE)],ncol=2,bbox_to_anchor=(1,1))
+lc_h = plt.plot(c_log)
+plt.legend(lc_h,[f'c{i}' for i in range(HIDDEN_SIZE)],ncol=2,bbox_to_anchor=(1,1))
 plt.ylabel("Hidden Biases")
 plt.xlabel("Epoch")
-plt.savefig("classical_hidden_bias_log.png")
+plt.savefig("classical_hidden_bias_log.pdf")
 
 # Weights graph
 ax = plt.gca()
@@ -144,7 +144,7 @@ lc_w = plt.plot(W_log)
 plt.legend(lc_w,[f'w{i},{j}' for j in range(HIDDEN_SIZE) for i in range(DATA_SIZE)],ncol=4,bbox_to_anchor=(1,1))
 plt.ylabel("Weights")
 plt.xlabel("Epoch")
-plt.savefig("classical_weights_log.png")
+plt.savefig("classical_weights_log.pdf")
 
 ################################## ENERGY ######################################
 

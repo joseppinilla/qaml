@@ -16,7 +16,10 @@ class BoltzmannMachine(torch.nn.Module):
         super(BM, self).__init__()
         self.V = V
         self.H = H
-        self.beta = beta
+        if torch.is_tensor(beta):
+            self.register_buffer('beta', beta)
+        else:
+            self.beta = beta
 
     @property
     def matrix(self):
@@ -52,26 +55,28 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
     def __init__(self, V, H, beta=1.0):
         super(RestrictedBoltzmannMachine, self).__init__(V,H,beta)
         # Visible linear bias
-        self.bv = torch.nn.Parameter(torch.ones(V)*0.5, requires_grad=True)
+        self.b = torch.nn.Parameter(torch.ones(V)*0.5, requires_grad=True)
         # Hidden linear bias
-        self.bh = torch.nn.Parameter(torch.ones(H)*0.5, requires_grad=True)
+        self.c = torch.nn.Parameter(torch.ones(H)*0.5, requires_grad=True)
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H, V)*0.1, requires_grad=True)
 
     @property
     def matrix(self):
         """A triangular matrix representation of biases and edge weights"""
-        A = torch.diag(torch.cat(self.bv,self.bh))
-        A[self.V:,:rbm.V] = self.W
+        A = torch.diag(torch.cat(self.b,self.c))
+        A[self.V:,:self.V] = self.W
         return A
 
-    def generate(self, hidden):
+    def generate(self, hidden, scale=1.0):
         """Sample from visible. P(V) = σ(HW^T + b)"""
-        return torch.sigmoid(F.linear(hidden, self.W.T, self.bv)*self.beta)
+        # return torch.sigmoid(F.linear(hidden, self.W.T, self.b)*self.beta*scale)
+        return torch.sigmoid(F.linear(hidden, self.W.T, self.b))
 
-    def forward(self, visible):
+    def forward(self, visible, scale=1.0):
         """Sample from hidden. P(H) = σ(VW^T + c)"""
-        return torch.sigmoid(F.linear(visible, self.W, self.bh)*self.beta)
+        return torch.sigmoid(F.linear(visible, self.W, self.c))
+        # return torch.sigmoid(F.linear(visible, self.W, self.c)*self.beta*scale)
 
     def energy(self, visible, hidden):
         """Compute the Energy of a state or batch of states.
@@ -81,7 +86,7 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
             hidden (Tensor):
         """
         # Visible and Hidden contributions (D,V)·(V,1) + (D,H)·(H,1) -> (D,1)
-        linear = torch.matmul(visible, self.bv.T) + torch.matmul(hidden, self.bh.T)
+        linear = torch.matmul(visible, self.b.T) + torch.matmul(hidden, self.c.T)
         # Quadratic contributions (D,V)·(V,H) -> (D,H)x(1,H) -> (D,H)
         quadratic = visible.matmul(self.W.T).mul(hidden)
         # sum_j((D,H)) -> (D,1)
@@ -98,9 +103,9 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
             visible (Tensor): Input vector of size RBM.V
         """
         # Visible contributions (D,V)(1,V) -> (D,1)
-        first_term = torch.matmul(visible,self.bv)
+        first_term = torch.matmul(visible,self.b)
         # Quadratic contributions (D,V)(H,V)^T  + (1,H) -> (D,H)
-        vW_h = F.linear(visible, self.W, self.bh)
+        vW_h = F.linear(visible, self.W, self.c)
         # Compounded Hidden contributions sum_j(log(exp(1 + (D,H)))) -> (D,1)
         second_term = torch.sum(F.softplus(vW_h),dim=-1)
 
