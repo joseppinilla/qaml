@@ -48,6 +48,8 @@ rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE,beta=beta)
 # Initialize biases
 torch.nn.init.uniform_(rbm.b,-0.1,0.1)
 torch.nn.init.uniform_(rbm.c,-0.1,0.1)
+torch.nn.init.uniform_(rbm.W,-0.1,0.1)
+
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
@@ -79,7 +81,6 @@ for t in range(EPOCHS):
         input_data = img_batch.flatten(1)
 
         # Positive Phase
-        # v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.scaling_factor)
         v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
         vk, prob_hk = qa_sampler(num_reads=100)
@@ -112,8 +113,8 @@ for t in range(EPOCHS):
     err_beta_log.append(epoch_error_beta.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
     print(f"Beta = {rbm.beta}")
-    print(f"Alpha = {qa_sampler.scaling_factor}")
-    print(f"Effective Beta = {rbm.beta*qa_sampler.scaling_factor}")
+    print(f"Alpha = {qa_sampler.scalar}")
+    print(f"Effective Beta = {rbm.beta*qa_sampler.scalar}")
 
 # %%
 ################################# qBAS Score ###################################

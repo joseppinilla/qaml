@@ -105,7 +105,7 @@ for t in range(EPOCHS):
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.scaling_factor)
+        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.scalar)
         # Negative Phase
         vk, prob_hk = qa_sampler(num_reads=1000)
 
@@ -135,9 +135,9 @@ for t in range(EPOCHS):
     err_log.append(epoch_error.item())
     err_beta_log.append(epoch_error_beta.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
-    print(f"Alpha = {qa_sampler.scaling_factor}")
+    print(f"Alpha = {qa_sampler.scalar}")
     print(f"Beta = {rbm.beta}")
-    print(f"Effective Beta = {rbm.beta*qa_sampler.scaling_factor}")
+    print(f"Effective Beta = {rbm.beta*qa_sampler.scalar}")
     ############################## CLASSIFICATION ##################################
     count = 0
     for i,(test_data, test_label) in enumerate(test_loader):

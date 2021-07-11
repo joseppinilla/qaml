@@ -8,6 +8,9 @@ import dwave.embedding
 import numpy as np
 
 class NetworkSampler(torch.nn.Module):
+
+    scalar : float
+
     def __init__(self, model):
         super(NetworkSampler, self).__init__()
         self.model = model
@@ -17,23 +20,6 @@ class NetworkSampler(torch.nn.Module):
 
         hidden_unknown = torch.Tensor([float('NaN')]*model.H)
         self.prob_h = torch.nn.Parameter(hidden_unknown, requires_grad=False)
-
-    @property
-    def scaling_factor(self):
-
-        h_range = self.properties['h_range']
-        J_range = self.properties['j_range']
-
-        bqm = self.binary_quadratic_model
-        h = bqm.linear
-        J = bqm.quadratic
-
-        alpha = max( max(h.max()/max(h_range),0),
-                max(h.min()/min(h_range),0),
-                max(J.max()/max(J_range),0),
-                max(J.min()/min(J_range),0))
-
-        return 1.0/alpha
 
     @property
     def binary_quadratic_model(self):
@@ -173,34 +159,25 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
             else:
                 S = self.binary_quadratic_model.quadratic
                 embedding = minorminer.find_embedding(S,T)
-        self.embedding = embedding
+        self.embedding = dwave.embedding.EmbeddedStructure(T.edges,embedding)
 
     def embed_bqm(self, visible=None, hidden=None, **kwargs):
+        embedding = self.embedding
+        bqm = self.binary_quadratic_model
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
-        bqm = self.binary_quadratic_model
+        bqm_emb = self.embedding.embed_bqm(bqm, **embed_kwargs)
 
-        bqm.scale(self.scaling_factor)
-        bqm.scale(1.0/self.model.beta)
+        ignored = set(edge for v in bqm for edge in embedding.chain_edges(v))
 
-        max_linear = max(bqm.linear.values())
+        # Same as auto_scale but ignores chains and retains scalar
+        h_range = self.properties['h_range']
+        j_range = self.properties['j_range']
+        self.scalar = bqm_emb.normalize(bias_range=h_range,
+                                        quadratic_range=j_range,
+                                        ignored_interactions=ignored)
 
-        # TODO: This may be done better using an auxiliary "clamped" node
-        if visible is not None:
-            for v,bias in enumerate(visible):
-                bqm.set_linear(v,bias.item()*max_linear*2)
-
-        if hidden is not None:
-            for h,bias in enumerate(hidden,start=self.model.V):
-                bqm.set_linear(h,bias.item()*max_linear*2)
-
-        if self.embedding is None:
-            return bqm
-
-        return dwave.embedding.embed_bqm(bqm,
-                                         embedding=self.embedding,
-                                         target_adjacency=self.networkx_graph,
-                                         **embed_kwargs)
+        return bqm_emb
 
 
     def unembed_sampleset(self,**kwargs):
