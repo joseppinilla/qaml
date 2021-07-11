@@ -53,8 +53,7 @@ torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
-                            weight_decay=weight_decay,
-                            momentum=momentum)
+                            weight_decay=weight_decay, momentum=momentum)
 
 beta_optimizer = torch.optim.SGD([beta],lr=0.01)
 
@@ -83,11 +82,11 @@ for t in range(EPOCHS):
         # Positive Phase
         v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
-        vk, prob_hk = qa_sampler(num_reads=100)
+        vk, prob_hk = qa_sampler(1000,auto_scale=False)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
-        err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta)
+        err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta) #TODO: use sampleset Energies?
 
         # Do not accumulated gradients
         optimizer.zero_grad()
@@ -134,7 +133,7 @@ print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 ############################## RECONSTRUCTION ##################################
 k = 10
 count = 0
-mask = torch_transforms.F.erase(torch.ones(SHAPE),1,1,2,2,0).flatten()
+mask = torch_transforms.functional.erase(torch.ones(SHAPE),1,1,2,2,0).flatten()
 for img, label in train_dataset:
 
     clamped = mask*img.flatten(1)

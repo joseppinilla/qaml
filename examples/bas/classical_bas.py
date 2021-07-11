@@ -34,7 +34,6 @@ train_loader = torch.utils.data.DataLoader(train_dataset,
                                            batch_size=BATCH_SIZE)
 
 # PLot all data
-len(train_dataset)
 fig,axs = plt.subplots(6,5)
 for ax,(img,label) in zip(axs.flat,train_dataset):
     ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')

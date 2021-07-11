@@ -6,7 +6,9 @@ packages = ['qaml']
 
 install_requires = ['networkx',
                     'decorator',
+                    'requests',
                     'torch',
+                    'torchvision',
                     'dimod',
                     'numpy',
                     'minorminer',

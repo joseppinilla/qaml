@@ -72,12 +72,11 @@ rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE,beta=beta)
 # Initialize biases
 torch.nn.init.uniform_(rbm.b,-0.1,0.1)
 torch.nn.init.uniform_(rbm.c,-0.1,0.1)
+torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 
 # Set up optimizer
-optimizer = torch.optim.SGD(rbm.parameters(),
-                            lr=learning_rate,
-                            weight_decay=weight_decay,
-                            momentum=momentum)
+optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
+                            weight_decay=weight_decay, momentum=momentum)
 
 beta_optimizer = torch.optim.SGD([beta],lr=0.01)
 
@@ -105,9 +104,9 @@ for t in range(EPOCHS):
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.scalar)
+        v0, prob_h0 = input_data, rbm(input_data,scale=rbm.beta*qa_sampler.scalar)
         # Negative Phase
-        vk, prob_hk = qa_sampler(num_reads=1000)
+        vk, prob_hk = qa_sampler(1000,auto_scale=True)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -167,7 +166,7 @@ ax = plt.gca()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',DATA_SIZE).colors))
 lc_v = ax.plot(b_log)
 plt.legend(iter(lc_v),[f'b{i}' for i in range(DATA_SIZE)],ncol=2,bbox_to_anchor=(1,1))
-*plt.ylabel("Visible Biases")
+plt.ylabel("Visible Biases")
 plt.xlabel("Epoch")
 plt.savefig("visible_bias_log.pdf")
 

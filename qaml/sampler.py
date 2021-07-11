@@ -32,9 +32,12 @@ class NetworkSampler(torch.nn.Module):
         lin_H = {j: -c.item() for j,c in enumerate(bias_h)}
         linear = {**lin_V,**{V+j: c for j,c in lin_H.items()}}
 
+        # Values from RBM are for QUBO formulation i.e. BINARY [0,1]
         quadratic = {(i,V+j): -W[j][i].item() for i in lin_V for j in lin_H}
+        bqm = dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
 
-        return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
+        # SPIN allows easier normalization and transparent chain_strength
+        return bqm.change_vartype('SPIN')
 
     def sample_visible(self):
         try:
@@ -133,14 +136,13 @@ class ExactNetworkSampler(NetworkSampler,dimod.ExactSolver):
 
 class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
+    scalar : float
+
     sample_kwargs = {"answer_mode":'raw',
                      "num_spin_reversal_transforms":0,
-                     "auto_scale":False,
-                     "anneal_schedule":[(0.0,0.0),(0.5,0.5),(10.5,0.5),(11.0,1.0)]}
+                     "auto_scale":False}
 
-    embed_kwargs = {"chain_strength":1.6,
-                    #"chain_strength":dwave.embedding.chain_strength.scaled,
-                    "smear_vartype":dimod.BINARY}
+    embed_kwargs = {"chain_strength":1.6}
 
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
@@ -160,45 +162,47 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
                 S = self.binary_quadratic_model.quadratic
                 embedding = minorminer.find_embedding(S,T)
         self.embedding = dwave.embedding.EmbeddedStructure(T.edges,embedding)
+        self.scalar = 1.0
 
     def embed_bqm(self, visible=None, hidden=None, **kwargs):
         embedding = self.embedding
         bqm = self.binary_quadratic_model
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
-        bqm_emb = self.embedding.embed_bqm(bqm, **embed_kwargs)
+        target_bqm = self.embedding.embed_bqm(bqm, **embed_kwargs)
 
-        ignored = set(edge for v in bqm for edge in embedding.chain_edges(v))
-
-        # Same as auto_scale but ignores chains and retains scalar
-        h_range = self.properties['h_range']
-        j_range = self.properties['j_range']
-        self.scalar = bqm_emb.normalize(bias_range=h_range,
-                                        quadratic_range=j_range,
-                                        ignored_interactions=ignored)
-
-        return bqm_emb
-
+        return target_bqm
 
     def unembed_sampleset(self,**kwargs):
         unembed_kwargs = {**self.unembed_kwargs,**kwargs}
-        if self.embedding is None:
-            return self.sampleset
 
-        return dwave.embedding.unembed_sampleset(self.sampleset,
-                                                 self.embedding,
-                                                 self.binary_quadratic_model,
-                                                 **unembed_kwargs)
+        sampleset = dwave.embedding.unembed_sampleset(self.sampleset,
+                                                      self.embedding,
+                                                      self.binary_quadratic_model,
+                                                      **unembed_kwargs)
+        return sampleset.change_vartype('BINARY')
 
-    def forward(self, visible=None, hidden=None, num_reads=100,
+    def forward(self, num_reads, visible=None, hidden=None, auto_scale=False,
                 embed_kwargs={}, unembed_kwargs={}, **kwargs):
+
         sample_kwargs = {**self.sample_kwargs,**kwargs}
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
         unembed_kwargs = {**self.unembed_kwargs,**unembed_kwargs}
 
-        bqm = self.embed_bqm(visible,hidden,**embed_kwargs)
+        target_bqm = self.embed_bqm(visible,hidden,**embed_kwargs)
 
-        self.sampleset = self.sample(bqm,num_reads=num_reads,**sample_kwargs)
+        if auto_scale:
+            # Same as target auto_scale but ignores chains and retains scalar
+            chain_edges = set(edge for v in self.embedding
+                              for edge in self.embedding.chain_edges(v))
+            norm_args = {'bias_range':self.properties['h_range'],
+                         'quadratic_range':self.properties['j_range'],
+                         'ignored_interactions':chain_edges}
+            self.scalar = target_bqm.normalize(**norm_args)
+        else:
+            target_bqm.scale(1.0/self.model.beta.item())
+
+        self.sampleset = self.sample(target_bqm,num_reads=num_reads,**sample_kwargs)
 
         sampleset = self.unembed_sampleset(**unembed_kwargs)
 
