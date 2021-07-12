@@ -98,7 +98,7 @@ for t in range(EPOCHS):
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
         # Positive Phase
-        v0,prob_h0 = input_data,rbm(input_data,scale=rbm.beta*qa_sampler.scalar)
+        v0,prob_h0 = input_data,rbm(input_data,scale=rbm.beta)
         # Negative Phase
         vk,prob_hk = qa_sampler(1000,auto_scale=True)
 

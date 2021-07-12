@@ -13,10 +13,10 @@ import torchvision.transforms as torch_transforms
 
 # %%
 ################################# Hyperparameters ##############################
-SHAPE = (4,4)
-DATA_SIZE = 4*4
+SHAPE = (7,7)
+DATA_SIZE = 7*7
 HIDDEN_SIZE = 16
-EPOCHS = 10
+EPOCHS = 75
 SAMPLES = 1000
 BATCH_SIZE = 500
 # Stochastic Gradient Descent
@@ -80,9 +80,9 @@ for t in range(EPOCHS):
         input_data = img_batch.flatten(1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data)
+        v0, prob_h0 = input_data, rbm(input_data,scale=rbm.beta)
         # Negative Phase
-        vk, prob_hk = qa_sampler(1000,auto_scale=False)
+        vk, prob_hk = qa_sampler(1000,auto_scale=True)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())

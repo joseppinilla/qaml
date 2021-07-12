@@ -34,10 +34,7 @@ class NetworkSampler(torch.nn.Module):
 
         # Values from RBM are for QUBO formulation i.e. BINARY [0,1]
         quadratic = {(i,V+j): -W[j][i].item() for i in lin_V for j in lin_H}
-        bqm = dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
-
-        # SPIN allows easier normalization and transparent chain_strength
-        return bqm.change_vartype('SPIN')
+        return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
 
     def sample_visible(self):
         try:
@@ -140,6 +137,7 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
     sample_kwargs = {"answer_mode":'raw',
                      "num_spin_reversal_transforms":0,
+                     "anneal_schedule":[(0.0,0.0),(0.5,0.5),(10.5,0.5),(11.0,1.0)],
                      "auto_scale":False}
 
     embed_kwargs = {"chain_strength":1.6}
@@ -164,10 +162,18 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
         self.embedding = dwave.embedding.EmbeddedStructure(T.edges,embedding)
         self.scalar = 1.0
 
-    def embed_bqm(self, visible=None, hidden=None, **kwargs):
+    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
         embedding = self.embedding
         bqm = self.binary_quadratic_model
         embed_kwargs = {**self.embed_kwargs,**kwargs}
+
+        if auto_scale:
+            # Same as target auto_scale but retains scalar
+            norm_args = {'bias_range':self.properties['h_range'],
+                         'quadratic_range':self.properties['j_range']}
+            self.scalar = bqm.normalize(**norm_args)
+        else:
+            bqm.scale(1.0/self.model.beta.item())
 
         target_bqm = self.embedding.embed_bqm(bqm, **embed_kwargs)
 
@@ -180,7 +186,7 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
                                                       self.embedding,
                                                       self.binary_quadratic_model,
                                                       **unembed_kwargs)
-        return sampleset.change_vartype('BINARY')
+        return sampleset
 
     def forward(self, num_reads, visible=None, hidden=None, auto_scale=False,
                 embed_kwargs={}, unembed_kwargs={}, **kwargs):
@@ -189,18 +195,7 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
         unembed_kwargs = {**self.unembed_kwargs,**unembed_kwargs}
 
-        target_bqm = self.embed_bqm(visible,hidden,**embed_kwargs)
-
-        if auto_scale:
-            # Same as target auto_scale but ignores chains and retains scalar
-            chain_edges = set(edge for v in self.embedding
-                              for edge in self.embedding.chain_edges(v))
-            norm_args = {'bias_range':self.properties['h_range'],
-                         'quadratic_range':self.properties['j_range'],
-                         'ignored_interactions':chain_edges}
-            self.scalar = target_bqm.normalize(**norm_args)
-        else:
-            target_bqm.scale(1.0/self.model.beta.item())
+        target_bqm = self.embed_bqm(visible,hidden,auto_scale,**embed_kwargs)
 
         self.sampleset = self.sample(target_bqm,num_reads=num_reads,**sample_kwargs)
 
