@@ -192,7 +192,7 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
         fpath = os.path.join(self.raw_folder, filename)
         dataset = np.genfromtxt(fpath,delimiter=',',dtype='float32')
         data,targets = np.split(dataset,[64],1)
-        return data.reshape((len(data),8,8))/16, targets
+        return data.reshape((len(data),8,8))/16, targets.flatten()
 
     @property
     def raw_folder(self) -> str:

@@ -2,15 +2,16 @@ import qaml
 import torch
 import itertools
 
-import matplotlib
-
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
-
 import torchvision.transforms as torch_transforms
 ################################# Hyperparameters ##############################
 SHAPE = (8,8)
 EPOCHS = 75
 BATCH_SIZE = 1024
+SUBCLASSES = [1,2,3,4]
+DATA_SIZE = SHAPE[0]*SHAPE[1]
+LABEL_SIZE = len(SUBCLASSES)
 # Stochastic Gradient Descent
 learning_rate = 0.1
 weight_decay = 1e-4
@@ -19,49 +20,42 @@ momentum = 0.5
 #################################### Input Data ################################
 train_dataset = qaml.datasets.OptDigits(root='./data/', train=True,
                                      transform=torch_transforms.Compose([
-                                     torch_transforms.ToTensor(),#]),
-                                     lambda x:(x>0.6).to(x.dtype)]), #Binarize
+                                     torch_transforms.ToTensor(),
+                                     lambda x:(x>0.5).to(x.dtype)]), #Binarize
                                      target_transform=torch_transforms.Compose([
-                                     lambda x:torch.LongTensor([int(x)]),
-                                     lambda x:torch.nn.functional.one_hot(x-1,4)]),
+                                     lambda x:torch.LongTensor([x.astype(int)]),
+                                     lambda x:F.one_hot(x-1,len(SUBCLASSES))]),
                                      download=True)
 
-train_dataset.classes = train_dataset.classes[1:5]
-idx = (train_dataset.targets==1) | (train_dataset.targets==2) | (train_dataset.targets==3) | (train_dataset.targets==4)
-train_dataset.targets = train_dataset.targets[idx]
-train_dataset.data = train_dataset.data.reshape(-1,1,8,8)[idx]
+train_idx = [i for i,y in enumerate(train_dataset.targets) if y in SUBCLASSES]
+sampler = torch.utils.data.SubsetRandomSampler(train_idx)
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE,
-                                           shuffle=True)
+                                           sampler=sampler)
 
 fig,axs = plt.subplots(4,5)
-for ax,(img,label) in zip(axs.flat,train_dataset):
-    ax.matshow(img.view(8, 8))
-    ax.set_title(str(label.argmax().item()+1))
+subdataset = zip(train_dataset.data[train_idx],train_dataset.targets[train_idx])
+for ax,(img,label) in zip(axs.flat,subdataset):
+    ax.matshow(img>0.5)
+    ax.set_title(int(label))
     ax.axis('off')
 plt.tight_layout()
 
 
 test_dataset = qaml.datasets.OptDigits(root='./data/', train=False,
                                     transform=torch_transforms.Compose([
-                                    torch_transforms.ToTensor(),#]),
-                                    lambda x:(x>0.6).to(x.dtype)]), #Binarize
+                                    torch_transforms.ToTensor(),
+                                    lambda x:(x>0.5).to(x.dtype)]), #Binarize
                                     target_transform=torch_transforms.Compose([
-                                    lambda x:torch.LongTensor([int(x)]),
-                                    lambda x:torch.nn.functional.one_hot(x-1,4)]),
+                                    lambda x:torch.LongTensor([x.astype(int)]),
+                                    lambda x:F.one_hot(x-1,len(SUBCLASSES))]),
                                     download=True)
-test_dataset.classes = test_dataset.classes[1:5]
-idx = (test_dataset.targets==1) | (test_dataset.targets==2) | (test_dataset.targets==3) | (test_dataset.targets==4)
-test_dataset.targets = test_dataset.targets[idx]
-test_dataset.data = test_dataset.data.reshape(-1,1,8,8)[idx]
-test_loader = torch.utils.data.DataLoader(test_dataset,shuffle=True)
 
-DATASET_SIZE = len(train_dataset)
+test_idx = [i for i,y in enumerate(test_dataset.targets) if y in SUBCLASSES]
+sampler = torch.utils.data.SubsetRandomSampler(test_idx)
+test_loader = torch.utils.data.DataLoader(test_dataset,sampler=sampler)
 
 # %%
 ################################# Model Definition #############################
-DATA_SIZE = len(train_dataset.data[0].flatten())
-LABEL_SIZE = len(train_dataset.classes)
-
 VISIBLE_SIZE = DATA_SIZE + LABEL_SIZE
 HIDDEN_SIZE = 16
 
@@ -104,9 +98,9 @@ for t in range(EPOCHS):
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,scale=rbm.beta*qa_sampler.scalar)
+        v0,prob_h0 = input_data,rbm(input_data,scale=rbm.beta*qa_sampler.scalar)
         # Negative Phase
-        vk, prob_hk = qa_sampler(1000,auto_scale=True)
+        vk,prob_hk = qa_sampler(1000,auto_scale=True)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -144,8 +138,8 @@ for t in range(EPOCHS):
         data_pred,label_pred = rbm.generate(prob_hk).split((DATA_SIZE,LABEL_SIZE),dim=1)
         if label_pred.argmax() == test_label.argmax():
             count+=1
-    accuracy_log.append(count/len(test_dataset))
-    print(f"Testing accuracy: {count}/{len(test_dataset)} ({count/len(test_dataset):.2f})")
+    accuracy_log.append(count/len(test_idx))
+    print(f"Testing accuracy: {count}/{len(test_idx)} ({count/len(test_idx):.2f})")
 
 plt.plot(accuracy_log)
 plt.ylabel("Testing Accuracy")
