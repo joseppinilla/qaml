@@ -152,14 +152,16 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
         self.networkx_graph = self.to_networkx_graph()
         self.sampleset = None
         if embedding is None:
-            T = self.networkx_graph
             if 'Restricted' in repr(self.model):
-                cache = minorminer.busclique.busgraph_cache(T)
+                cache = minorminer.busclique.busgraph_cache(self.networkx_graph)
                 embedding = cache.find_biclique_embedding(model.V,model.H)
             else:
                 S = self.binary_quadratic_model.quadratic
-                embedding = minorminer.find_embedding(S,T)
-        self.embedding = dwave.embedding.EmbeddedStructure(T.edges,embedding)
+                embedding = minorminer.find_embedding(S,self.networkx_graph)
+        if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
+            self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,embedding)
+        else:
+            self.embedding = embedding
         self.scalar = 1.0
 
     def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
@@ -173,7 +175,7 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
                          'quadratic_range':self.properties['j_range']}
             self.scalar = bqm.normalize(**norm_args)
         else:
-            bqm.scale(1.0/self.model.beta.item())
+            bqm.scale(1.0/float(self.model.beta))
 
         target_bqm = self.embedding.embed_bqm(bqm, **embed_kwargs)
 
