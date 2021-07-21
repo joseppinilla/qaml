@@ -6,6 +6,7 @@ import dwave.system
 import dwave.embedding
 
 import numpy as np
+import networkx as nx
 
 class NetworkSampler(torch.nn.Module):
 
@@ -33,7 +34,13 @@ class NetworkSampler(torch.nn.Module):
         linear = {**lin_V,**{V+j: c for j,c in lin_H.items()}}
 
         # Values from RBM are for QUBO formulation i.e. BINARY [0,1]
-        quadratic = {(i,V+j): -W[j][i].item() for i in lin_V for j in lin_H}
+        quadratic = {}
+        for i in lin_V:
+            for j in lin_H:
+                weight = -W[j][i].item()
+                if weight == 0: continue
+                quadratic[(i,V+j)] = weight
+
         return dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
 
     def sample_visible(self):
@@ -207,3 +214,58 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
         return samples_v, samples_h
+
+QASampler = QuantumAnnealingNetworkSampler
+
+class AdachiNetworkSampler(QASampler,dwave.system.DWaveSampler):
+    """ Prune (currently unpruned) units in a tensor from D-Wave graph using the
+    method in [1-2]. Prune only disconnected edges.
+
+    [1] Adachi, S. H., & Henderson, M. P. (2015). Application of Quantum
+    Annealing to Training of Deep Neural Networks.
+    https://doi.org/10.1038/nature10012
+
+    [2] Job, J., & Adachi, S. (2020). Systematic comparison of deep belief
+    network training using quantum annealing vs. classical techniques.
+    http://arxiv.org/abs/2009.00134
+
+    """
+
+    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
+        new_embedding = dict(self.embedding)
+        # Create "sub-chains" to allow gaps in chains
+        for x in self.embedding:
+            emb_x = self.embedding[x]
+            chain_edges = self.embedding._chain_edges[x]
+            # Very inneficient but does the job of creating chain subgraphs
+            chain_graph = nx.Graph()
+            chain_graph.add_nodes_from([v for v in emb_x if self.networkx_graph.has_node(v)])
+            chain_graph.add_edges_from([(emb_x[i],emb_x[j]) for i,j in chain_edges if self.networkx_graph.has_edge(emb_x[i],emb_x[j])])
+            chain_subgraphs = [chain_graph.subgraph(c) for c in nx.connected_components(chain_graph)]
+
+            if len(chain_subgraphs)>1:
+                for i,G in enumerate(chain_subgraphs):
+                    new_embedding[f'{x}_ADACHI_SUBCHAIN{i}'] = tuple(G.nodes)
+                del new_embedding[x]
+            elif len(chain_subgraphs)==1:
+                pass
+            else:
+                raise RuntimeError(f"No subgraphs were found for chain: {x}")
+
+        self.embedding_orig = self.embedding.copy()
+        self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
+
+        bqm = self.binary_quadratic_model
+        embed_kwargs = {**self.embed_kwargs,**kwargs}
+
+        if auto_scale:
+            # Same as target auto_scale but retains scalar
+            norm_args = {'bias_range':self.properties['h_range'],
+                         'quadratic_range':self.properties['j_range']}
+            self.scalar = bqm.normalize(**norm_args)
+        else:
+            bqm.scale(1.0/float(self.model.beta))
+
+        target_bqm = self.embedding.embed_bqm(bqm, **embed_kwargs)
+
+        return target_bqm
