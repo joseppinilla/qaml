@@ -8,6 +8,9 @@ import dwave.embedding
 
 import numpy as np
 import networkx as nx
+import dwave_networkx as dnx
+
+from minorminer.utils.polynomialembedder import processor
 
 class NetworkSampler(torch.nn.Module):
 
@@ -236,15 +239,20 @@ class AdachiNetworkSampler(QASampler,dwave.system.DWaveSampler):
 
     def __init__(self, model, embedding=None,
                  failover=False, retry_interval=-1, **config):
-        QASampler.__init__(self,model,embedding,failover,retry_interval,**config)
+        QASampler.__init__(self,model,{},failover,retry_interval,**config)
         self.target_bqm = None
         self.embedding_orig = None
         self.disjoint_chains = {}
 
-    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
-        embed_kwargs = {**self.embed_kwargs,**kwargs}
-        self.embedding_orig = copy.deepcopy(self.embedding)
-        new_embedding = dict(copy.deepcopy(self.embedding))
+        self.template_graph = dnx.chimera_graph(16,16)
+        self.embedder = processor(self.template_graph.edges(), M=16, N=16, L=4)
+        if embedding is None:
+            left,right = self.embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+            embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,
+                                {v:chain for v,chain in enumerate(left+right)})
+        self.embedding_orig = copy.deepcopy(embedding)
+        new_embedding = dict(copy.deepcopy(embedding))
+
         # Create "sub-chains" to allow gaps in chains
         for x in self.embedding_orig:
             emb_x = new_embedding[x]
@@ -267,6 +275,9 @@ class AdachiNetworkSampler(QASampler,dwave.system.DWaveSampler):
 
 
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
+
+    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
+        embed_kwargs = {**self.embed_kwargs,**kwargs}
 
         # Create new BQM including new subchains
         bqm_orig = self.binary_quadratic_model.copy()
