@@ -50,9 +50,6 @@ class AdaptiveUnstructured(BasePruningMethod):
         # Account for missing interactions between chains by using mask
         for v in range(V):
             for h in range(V,V+H):
-                emb_v, emb_h = embedding[v], embedding[h]
-                int_v = embedding._interaction_edges[v,h]
-                int_h = embedding._interaction_edges[h,v]
                 for interaction in embedding.interaction_edges(v,h):
                     if not self.solver_graph.has_edge(*interaction):
                         mask[h-V][v] = 0
