@@ -12,6 +12,8 @@ install_requires = ['networkx',
                     'dimod',
                     'numpy',
                     'minorminer',
+                    'matplotlib',
+                    'dwave-system',
                     'dwave-networkx']
 
 
