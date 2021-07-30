@@ -1,5 +1,5 @@
 # %% markdown
-# # CLassical RBM training on the Bars-And-Stripes Dataset for Reconstruction
+# # Classical RBM training on the Bars-And-Stripes Dataset for Reconstruction
 # This is an example on classical Gibbs training of an RBM on the BAS(4,4)
 # dataset.
 # Developed by: Jose Pinilla
