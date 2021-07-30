@@ -13,8 +13,8 @@ import torchvision.transforms as torch_transforms
 
 # %%
 ################################# Hyperparameters ##############################
-SHAPE = (4,4)
-DATA_SIZE = 4*4
+M,N = SHAPE = (4,4)
+DATA_SIZE = N*M
 HIDDEN_SIZE = 16
 EPOCHS = 2000
 SAMPLES = 1000
@@ -29,6 +29,8 @@ momentum = 0.5
 train_dataset = qaml.datasets.BAS(*SHAPE,transform=torch_transforms.ToTensor())
 train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=True,
                                                num_samples=SAMPLES)
+# Or just shuffle without new samples:
+# train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
 train_loader = torch.utils.data.DataLoader(train_dataset,
                                            sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
@@ -51,7 +53,8 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
 
 # Set up training mechanisms
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
-CD = qaml.autograd.ConstrastiveDivergence()
+CD = qaml.autograd.SampleBasedConstrastiveDivergence() # L1 loss
+# CD = qaml.autograd.ConstrastiveDivergence() # MSE loss
 
 # %%
 ################################## Model Training ##############################
@@ -70,6 +73,8 @@ for t in range(EPOCHS):
         v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
         vk, prob_hk = gibbs_sampler(v0.detach(), k=5)
+        # Or sample from random init
+        # vk, prob_hk = gibbs_sampler(0.1*torch.randn((500,rbm.V)), k=5)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -92,7 +97,7 @@ for t in range(EPOCHS):
     err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
 # Set the model to evaluation mode
-rbm.eval()
+# rbm.eval()
 
 # %%
 ################################## Sampling ####################################
@@ -132,14 +137,14 @@ print(f"Dataset Reconstruction: {count/len(train_dataset):.02}")
 # %%
 ############################ MODEL VISUALIZATION ###############################
 
-# Error graph
+# L1 error graph
 plt.plot(err_log)
-plt.ylabel("Reconstruction Error")
+plt.ylabel("Reconstruction Error (L1)")
 plt.xlabel("Epoch")
 plt.savefig("classical_err_log.pdf")
 
 # Visible bias graph
-ax = plt.gca()
+fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',DATA_SIZE).colors))
 lc_v = ax.plot(b_log)
 plt.legend(lc_v,[f'b{i}' for i in range(DATA_SIZE)],ncol=4,loc=(0,1))
@@ -148,13 +153,22 @@ plt.xlabel("Epoch")
 plt.savefig("classival_b_log.pdf")
 
 # Hidden bias graph
-ax = plt.gca()
+fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE).colors))
 lc_h = plt.plot(c_log)
 plt.legend(lc_h,[f'c{i}' for i in range(HIDDEN_SIZE)],ncol=4,loc=(0,1))
 plt.ylabel("Hidden Biases")
 plt.xlabel("Epoch")
 plt.savefig("classical_c_log.pdf")
+
+# Weights graph
+fig, ax = plt.subplots()
+ax.set_prop_cycle('color', list(plt.get_cmap('turbo',rbm.V*rbm.H).colors))
+lc_w = plt.plot(W_log)
+labels = [f'W{i}' for i in range(rbm.V*rbm.H)]
+plt.legend(lc_w,labels,ncol=10,bbox_to_anchor=(1,1))
+plt.ylabel("Weights")
+plt.xlabel("Epoch")
 
 # %%
 ################################## ENERGY ######################################
