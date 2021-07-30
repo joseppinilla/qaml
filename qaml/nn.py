@@ -68,13 +68,13 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         A[self.V:,:self.V] = self.W
         return A
 
-    def generate(self, hidden, scale=1.0):
+    def generate(self, hidden):
         """Sample from visible. P(V) = σ(HW^T + b)"""
-        return torch.sigmoid(F.linear(hidden, self.W.T, self.b)*scale)
+        return torch.sigmoid(F.linear(hidden, self.W.T, self.b)*self.beta)
 
-    def forward(self, visible, scale=1.0):
+    def forward(self, visible):
         """Sample from hidden. P(H) = σ(VW^T + c)"""
-        return torch.sigmoid(F.linear(visible, self.W, self.c)*scale)
+        return torch.sigmoid(F.linear(visible, self.W, self.c)*self.beta)
 
     def energy(self, visible, hidden):
         """Compute the Energy of a state or batch of states.
@@ -88,7 +88,7 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         # Quadratic contributions (D,V)·(V,H) -> (D,H)x(1,H) -> (D,H)
         quadratic = visible.matmul(self.W.T).mul(hidden)
         # sum_j((D,H)) -> (D,1)
-        return -(linear + torch.sum(quadratic,dim=-1))
+        return -self.beta*(linear + torch.sum(quadratic,dim=-1))
 
     def free_energy(self, visible):
         """Also called "effective energy", this expression differs from energy
@@ -107,7 +107,7 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         # Compounded Hidden contributions sum_j(log(exp(1 + (D,H)))) -> (D,1)
         second_term = torch.sum(F.softplus(vW_h),dim=-1)
 
-        return -(first_term + second_term)
+        return -self.beta*(first_term + second_term)
 
 RBM = RestrictedBoltzmannMachine
 
