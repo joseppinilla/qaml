@@ -20,11 +20,11 @@ class ConstrastiveDivergence(torch.autograd.Function):
         D = len(v0)
 
         # for j = 1,...,m do
-        #     \Delta a_j += v_j^{0} - v_j^{k}
+        #     \Delta b_j += v_j^{0} - v_j^{k}
         v_grad = -grad_output*torch.mean(v0 - prob_vk, dim=0)
 
         # for i = 1,...,n do
-        #     \Delta b_i += p(H_i = 1 | v^{0}) - p(H_i = 1 | v^{k})
+        #     \Delta c_i += p(H_i = 1 | v^{0}) - p(H_i = 1 | v^{k})
         h_grad = -grad_output*torch.mean(prob_h0 - prob_hk, dim=0)
 
         # for i = 1,...,n, j = 1,...,m do

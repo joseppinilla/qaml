@@ -90,7 +90,7 @@ for t in range(EPOCHS):
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
         err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta) #TODO: use sampleset Energies?
 
-        # Do not accumulated gradients
+        # Do not accumulate gradients
         optimizer.zero_grad()
         beta_optimizer.zero_grad()
 
@@ -101,7 +101,7 @@ for t in range(EPOCHS):
         # Update parameters
         optimizer.step()
         beta_optimizer.step()
-
+        
         #Accumulate error for this epoch
         epoch_error  += err
         epoch_error_beta  += err_beta

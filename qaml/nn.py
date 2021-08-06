@@ -109,6 +109,25 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
 
         return -self.beta*(first_term + second_term)
 
+    def log_likelihood(self, *tensors):
+        """
+
+        """
+        # Model
+        N = self.V+self.H
+        sequence = torch.tensor([0.,1.],requires_grad=False).repeat(N,1)
+        product = torch.cartesian_prod(*sequence)
+        model_energies = self.energy(*product.split([self.V,self.H],1))
+        model_term = torch.exp(-model_energies).sum().log()
+        # Data
+        h_sequence = torch.tensor([0.,1.],requires_grad=False).repeat(self.H,1)
+        h_product = torch.cartesian_prod(*h_sequence)
+        for visible in tensors:
+            v_sequence = visible.repeat(len(h_product),1)
+            data_energies = self.energy(v_sequence,h_product)
+            data_term = torch.exp(-data_energies).sum().log()
+            yield (data_term - model_term).item()
+
 RBM = RestrictedBoltzmannMachine
 
 class LimitedBoltzmannMachine(BoltzmannMachine):
