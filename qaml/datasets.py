@@ -2,6 +2,7 @@ import os
 import torch
 import requests
 import itertools
+import torchvision
 
 import numpy as np
 
@@ -13,11 +14,11 @@ class BAS(torch.utils.data.Dataset):
 
         cols (int): Number of columns in the BAS image.
 
-        transform (callable, optional): A function/transform that  takes in an PIL image
-            and returns a transformed version. E.g, ``transforms.RandomCrop``
+        transform (callable, optional): A function/transform that  takes in an
+            PIL image and returns a transformed version.
 
-        target_transform (callable, optional): A function/transform that takes in the
-            target and transforms it.
+        target_transform (callable, optional): A function/transform that takes
+            in the target and transforms it.
 
     Example:
 
@@ -59,7 +60,7 @@ class BAS(torch.utils.data.Dataset):
         if isinstance(item,np.ndarray):
             iter = (i for i,d in enumerate(self.data) if np.array_equiv(d,item))
         else:
-            raise RuntimeError("Given item isn't torch.Tensor or numpy.ndrray")
+            raise RuntimeError("Item isn't `torch.Tensor` or `numpy.ndrray`")
 
         return next(iter,None)
 
@@ -141,8 +142,6 @@ class BAS(torch.utils.data.Dataset):
         labels += [3] # All ones
 
         return data, np.asarray(labels,dtype='float32')
-
-import torchvision
 
 class OptDigits(torchvision.datasets.vision.VisionDataset):
     """ Based on the MNIST Dataset implementation, but enough differences to not

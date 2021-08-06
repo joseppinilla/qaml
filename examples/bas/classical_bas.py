@@ -79,7 +79,7 @@ for t in range(EPOCHS):
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
 
-        # Do not accumulated gradients
+        # Do not accumulate gradients
         optimizer.zero_grad()
         # Compute gradients. Save compute graph at last epoch
         err.backward()
