@@ -1,3 +1,10 @@
+# %% markdown
+# # Classical RBM training on the OptDigits Dataset for reconstruction and classification
+# This is an example on classical Gibbs training of an RBM on the OptDigits
+# dataset.
+# Developed by: Jose Pinilla
+# %%
+# Required packages
 import qaml
 import torch
 import itertools
@@ -5,18 +12,21 @@ import itertools
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
+
+# %%
 ################################# Hyperparameters ##############################
-SHAPE = (8,8)
+M,N = SHAPE = (8,8)
 EPOCHS = 75
 BATCH_SIZE = 1024
 SUBCLASSES = [1,2,3,4]
-DATA_SIZE = SHAPE[0]*SHAPE[1]
+DATA_SIZE = N*M
 LABEL_SIZE = len(SUBCLASSES)
 # Stochastic Gradient Descent
 learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
+# %%
 #################################### Input Data ################################
 train_dataset = qaml.datasets.OptDigits(root='./data/', train=True,
                                      transform=torch_transforms.Compose([
@@ -52,7 +62,7 @@ test_dataset = qaml.datasets.OptDigits(root='./data/', train=False,
 
 test_idx = [i for i,y in enumerate(test_dataset.targets) if y in SUBCLASSES]
 sampler = torch.utils.data.SubsetRandomSampler(test_idx)
-test_loader = torch.utils.data.DataLoader(test_dataset, sampler=sampler)
+test_loader = torch.utils.data.DataLoader(test_dataset,sampler=sampler)
 
 # %%
 ################################# Model Definition #############################
@@ -72,6 +82,7 @@ optimizer = torch.optim.SGD(rbm.parameters(),
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 
+# %%
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
@@ -119,18 +130,24 @@ for t in range(EPOCHS):
     accuracy_log.append(count/len(test_idx))
     print(f"Testing accuracy: {count}/{len(test_idx)} ({count/len(test_idx):.2f})")
 
-plt.plot(accuracy_log)
+# %%
+############################ MODEL VISUALIZATION ###############################
+
+# Accuracy graph
+fig, ax = plt.subplots()
+ax.plot(accuracy_log)
 plt.ylabel("Testing Accuracy")
 plt.xlabel("Epoch")
 
-# Error graph
-plt.plot(err_log)
+# L1 error graph
+fig, ax = plt.subplots()
+ax.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
 plt.savefig("classical_err_log.pdf")
 
 # Visible bias graph
-ax = plt.gca()
+fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',DATA_SIZE).colors))
 lc_v = ax.plot(b_log)
 plt.legend(iter(lc_v),[f'b{i}' for i in range(DATA_SIZE)],ncol=2,bbox_to_anchor=(1,1))
@@ -139,7 +156,7 @@ plt.xlabel("Epoch")
 plt.savefig("classical_visible_bias_log.pdf")
 
 # Hidden bias graph
-ax = plt.gca()
+fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE).colors))
 lc_h = plt.plot(c_log)
 plt.legend(lc_h,[f'c{i}' for i in range(HIDDEN_SIZE)],ncol=2,bbox_to_anchor=(1,1))
@@ -148,7 +165,7 @@ plt.xlabel("Epoch")
 plt.savefig("classical_hidden_bias_log.pdf")
 
 # Weights graph
-ax = plt.gca()
+fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE*DATA_SIZE).colors))
 lc_w = plt.plot(W_log)
 plt.legend(lc_w,[f'w{i},{j}' for j in range(HIDDEN_SIZE) for i in range(DATA_SIZE)],ncol=4,bbox_to_anchor=(1,1))
@@ -156,11 +173,12 @@ plt.ylabel("Weights")
 plt.xlabel("Epoch")
 plt.savefig("classical_weights_log.pdf")
 
+# %%
 ################################## ENERGY ######################################
 
 data_energies = []
-for img,label in train_dataset:
-    data = torch.cat((img.flatten(1),label.flatten(1)),1)
+for img,label in subdataset:
+    data = torch.cat((torch.tensor(img).flatten(1),torch.tensor(label).flatten(1)),1)
     data_energies.append(rbm.free_energy(data).item())
 
 rand_data = torch.rand(len(train_dataset)*10,rbm.V)
@@ -175,7 +193,7 @@ for img,label in train_dataset:
 
 qa_energies = []
 qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver="Advantage_system1.1")
-qa_sampleset = qa_sampler(num_reads=1000)
+qa_sampleset = qa_sampler(num_reads=1000,auto_scale=True)
 for s_v,s_h in zip(*qa_sampleset):
     qa_energies.append(rbm.free_energy(s_v.detach()).item())
 
@@ -197,8 +215,9 @@ plt.ylabel("Count/Total")
 plt.xlabel("Energy")
 plt.savefig("classical_energies.pdf")
 
+# %%
 ################################## VISUALIZE ###################################
-plt.matshow(rbm.bv.detach()[:DATA_SIZE].view(*SHAPE), cmap='viridis', vmin=-1, vmax=1)
+plt.matshow(rbm.b.detach()[:DATA_SIZE].view(*SHAPE), cmap='viridis', vmin=-1, vmax=1)
 plt.colorbar()
 
 fig,axs = plt.subplots(HIDDEN_SIZE//4,4)
