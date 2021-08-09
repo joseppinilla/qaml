@@ -221,7 +221,7 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
 
 QASampler = QuantumAnnealingNetworkSampler
 
-class AdachiNetworkSampler(QASampler,dwave.system.DWaveSampler):
+class AdachiQASampler(QASampler):
     """ Prune (currently unpruned) units in a tensor from D-Wave graph using the
     method in [1-2]. Prune only disconnected edges.
 
@@ -382,6 +382,136 @@ class AdachiNetworkSampler(QASampler,dwave.system.DWaveSampler):
 
         sampleset = dwave.embedding.unembed_sampleset(self.sampleset,
                                                       embedding,
+                                                      self.binary_quadratic_model,
+                                                      **unembed_kwargs)
+
+        return sampleset
+
+class AdaptiveQASampler(QASampler):
+    """ Prune (currently unpruned) units in a tensor from D-Wave graph using the
+    method in [1-2]. Prune only disconnected edges.
+
+    [1] Adachi, S. H., & Henderson, M. P. (2015). Application of Quantum
+    Annealing to Training of Deep Neural Networks.
+    https://doi.org/10.1038/nature10012
+
+    [2] Job, J., & Adachi, S. (2020). Systematic comparison of deep belief
+    network training using quantum annealing vs. classical techniques.
+    http://arxiv.org/abs/2009.00134
+
+    """
+
+    disjoint_chains : dict
+
+    def __init__(self, model, embedding=None,
+                 failover=False, retry_interval=-1, **config):
+        QASampler.__init__(self,model,{},failover,retry_interval,**config)
+        self.target_bqm = None
+        self.embedding_orig = None
+        self.networkx_graph = self.to_networkx_graph()
+        if embedding is None:
+            if self.networkx_graph.graph['family'] == 'pegasus':
+                self.template_graph = dnx.pegasus_graph(16)
+                helper = minorminer.utils.pegasus._pegasus_fragment_helper
+                _processor, _converter = helper(16, self.template_graph)
+                _left,_right = _processor.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
+                embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,
+                                {**left,**{k+model.V:v for k,v in right.items()}})
+
+            elif self.networkx_graph.graph['family'] == 'chimera':
+                self.template_graph = dnx.chimera_graph(16,16)
+                self.embedder = processor(self.template_graph.edges(), M=16, N=16, L=4)
+                left,right = self.embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,
+                                {v:chain for v,chain in enumerate(left+right)})
+            else:
+                raise RuntimeError("Graph `family` not compatible.")
+        else:
+            if self.networkx_graph.graph['family'] == 'pegasus':
+                self.template_graph = dnx.pegasus_graph(16)
+            elif self.networkx_graph.graph['family'] == 'chimera':
+                self.template_graph = dnx.chimera_graph(16,16)
+            embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,embedding)
+
+
+        self.embedding_orig = copy.deepcopy(embedding)
+        new_embedding = {}
+
+        # Create "sub-chains" to allow gaps in chains
+        self.disjoint_chains = {}
+        for x in self.embedding_orig:
+            emb_x = self.embedding_orig[x]
+            chain_edges = self.embedding_orig._chain_edges[x]
+            # Very inneficient but does the job of creating chain subgraphs
+            chain_graph = nx.Graph()
+            chain_graph.add_nodes_from([v for v in emb_x if self.networkx_graph.has_node(v)])
+            chain_graph.add_edges_from([(emb_x[i],emb_x[j]) for i,j in chain_edges if self.networkx_graph.has_edge(emb_x[i],emb_x[j])])
+            chain_subgraphs = [(len(c),chain_graph.subgraph(c)) for c in nx.connected_components(chain_graph)]
+
+            if len(chain_subgraphs)>1:
+                l,subgraph = max(chain_subgraphs,key=lambda l_chain: l_chain[0])
+                new_embedding[x] = list(subgraph.nodes)
+            elif len(chain_subgraphs)==1:
+                new_embedding[x] = list(chain_graph.nodes)
+            else:
+                raise RuntimeError(f"No subgraphs were found for chain: {x}")
+
+        self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
+
+    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
+        embed_kwargs = {**self.embed_kwargs,**kwargs}
+
+        # Create new BQM including new subchains
+        bqm_orig = self.binary_quadratic_model.copy()
+        smear_vartype = bqm_orig.vartype
+
+        target_bqm = bqm_orig.empty(bqm_orig.vartype)
+
+        chain_strength = embed_kwargs['chain_strength']
+        for v, bias in bqm_orig.linear.items():
+
+            chain = self.embedding[v]
+            b = bias / len(chain)
+            target_bqm.add_variables_from({u: b for u in chain})
+
+            if smear_vartype is dimod.SPIN:
+                for p, q in self.embedding.chain_edges(v):
+                    target_bqm.add_interaction(p, q, -chain_strength)
+                    offset += strength
+            else:
+                # this is in spin, but we need to respect the vartype
+                for p, q in self.embedding.chain_edges(v):
+                    target_bqm.add_interaction(p, q, -4*chain_strength)
+                    target_bqm.add_variable(p, 2*chain_strength)
+                    target_bqm.add_variable(q, 2*chain_strength)
+
+        target_bqm.add_offset(bqm_orig.offset)
+
+        for (u, v), bias in bqm_orig.quadratic.items():
+            interactions = list(self.embedding.interaction_edges(u, v))
+
+            if interactions:
+                b = bias / len(interactions)
+                target_bqm.add_interactions_from((u, v, b) for u, v in interactions)
+
+        if auto_scale:
+            # Same as target auto_scale but retains scalar
+            norm_args = {'bias_range':self.properties['h_range'],
+                         'quadratic_range':self.properties['j_range']}
+            self.scalar = target_bqm.normalize(**norm_args)
+        else:
+            target_bqm.scale(1.0/float(self.model.beta))
+
+        self.target_bqm = target_bqm
+
+        return target_bqm
+
+    def unembed_sampleset(self, **kwargs):
+        unembed_kwargs = {**self.unembed_kwargs,**kwargs}
+
+        sampleset = dwave.embedding.unembed_sampleset(self.sampleset,
+                                                      self.embedding,
                                                       self.binary_quadratic_model,
                                                       **unembed_kwargs)
 

@@ -7,6 +7,7 @@
 # Required packages
 import qaml
 import torch
+torch.manual_seed(0) # For deterministic weights
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms

@@ -7,6 +7,7 @@
 # Required packages
 import qaml
 import torch
+torch.manual_seed(0) # For deterministic weights
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
@@ -101,7 +102,7 @@ for t in range(EPOCHS):
         # Update parameters
         optimizer.step()
         beta_optimizer.step()
-        
+
         #Accumulate error for this epoch
         epoch_error  += err
         epoch_error_beta  += err_beta
