@@ -242,20 +242,40 @@ class AdachiNetworkSampler(QASampler,dwave.system.DWaveSampler):
         QASampler.__init__(self,model,{},failover,retry_interval,**config)
         self.target_bqm = None
         self.embedding_orig = None
-        self.disjoint_chains = {}
-
-        self.template_graph = dnx.chimera_graph(16,16)
-        self.embedder = processor(self.template_graph.edges(), M=16, N=16, L=4)
+        self.networkx_graph = self.to_networkx_graph()
         if embedding is None:
-            left,right = self.embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
-            embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,
+            if self.networkx_graph.graph['family'] == 'pegasus':
+                self.template_graph = dnx.pegasus_graph(16)
+                helper = minorminer.utils.pegasus._pegasus_fragment_helper
+                _processor, _converter = helper(16, self.template_graph)
+                _left,_right = _processor.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
+                embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,
+                                {**left,**{k+model.V:v for k,v in right.items()}})
+
+            elif self.networkx_graph.graph['family'] == 'chimera':
+                self.template_graph = dnx.chimera_graph(16,16)
+                self.embedder = processor(self.template_graph.edges(), M=16, N=16, L=4)
+                left,right = self.embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,
                                 {v:chain for v,chain in enumerate(left+right)})
+            else:
+                raise RuntimeError("Graph `family` not compatible.")
+        else:
+            if self.networkx_graph.graph['family'] == 'pegasus':
+                self.template_graph = dnx.pegasus_graph(16)
+            elif self.networkx_graph.graph['family'] == 'chimera':
+                self.template_graph = dnx.chimera_graph(16,16)
+            embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,embedding)
+
+
         self.embedding_orig = copy.deepcopy(embedding)
-        new_embedding = dict(copy.deepcopy(embedding))
+        new_embedding = {}
 
         # Create "sub-chains" to allow gaps in chains
+        self.disjoint_chains = {}
         for x in self.embedding_orig:
-            emb_x = new_embedding[x]
+            emb_x = self.embedding_orig[x]
             chain_edges = self.embedding_orig._chain_edges[x]
             # Very inneficient but does the job of creating chain subgraphs
             chain_graph = nx.Graph()
@@ -266,13 +286,11 @@ class AdachiNetworkSampler(QASampler,dwave.system.DWaveSampler):
             if len(chain_subgraphs)>1:
                 for i,G in enumerate(chain_subgraphs):
                     new_embedding[f'{x}_ADACHI_SUBCHAIN_{i}'] = tuple(G.nodes)
-                del new_embedding[x]
                 self.disjoint_chains[x] = len(chain_subgraphs)
             elif len(chain_subgraphs)==1:
-                pass
+                new_embedding[x] = list(chain_graph.nodes)
             else:
                 raise RuntimeError(f"No subgraphs were found for chain: {x}")
-
 
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
@@ -341,9 +359,9 @@ class AdachiNetworkSampler(QASampler,dwave.system.DWaveSampler):
             else:
                 interactions = list(self.embedding.interaction_edges(u, v))
 
-            b = bias / len(interactions)
-
-            target_bqm.add_interactions_from((u, v, b) for u, v in interactions)
+            if interactions:
+                b = bias / len(interactions)
+                target_bqm.add_interactions_from((u, v, b) for u, v in interactions)
 
         if auto_scale:
             # Same as target auto_scale but retains scalar
