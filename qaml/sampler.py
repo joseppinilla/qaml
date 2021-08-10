@@ -401,13 +401,10 @@ class AdaptiveQASampler(QASampler):
 
     """
 
-    disjoint_chains : dict
-
     def __init__(self, model, embedding=None,
                  failover=False, retry_interval=-1, **config):
         QASampler.__init__(self,model,{},failover,retry_interval,**config)
         self.target_bqm = None
-        self.embedding_orig = None
         self.networkx_graph = self.to_networkx_graph()
         if embedding is None:
             if self.networkx_graph.graph['family'] == 'pegasus':
@@ -434,15 +431,12 @@ class AdaptiveQASampler(QASampler):
                 self.template_graph = dnx.chimera_graph(16,16)
             embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,embedding)
 
-
-        self.embedding_orig = copy.deepcopy(embedding)
         new_embedding = {}
 
-        # Create "sub-chains" to allow gaps in chains
-        self.disjoint_chains = {}
-        for x in self.embedding_orig:
-            emb_x = self.embedding_orig[x]
-            chain_edges = self.embedding_orig._chain_edges[x]
+        # Find "best" subchain (i.e longest) and assign node to it.
+        for x in embedding:
+            emb_x = embedding[x]
+            chain_edges = embedding._chain_edges[x]
             # Very inneficient but does the job of creating chain subgraphs
             chain_graph = nx.Graph()
             chain_graph.add_nodes_from([v for v in emb_x if self.networkx_graph.has_node(v)])

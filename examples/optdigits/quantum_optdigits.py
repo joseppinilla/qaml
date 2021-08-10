@@ -213,30 +213,24 @@ plt.savefig("weights_log.pdf")
 rand_data = torch.rand(len(train_dataset)*10,rbm.V)
 rand_energies = rbm.free_energy(rand_data.bernoulli()).detach().numpy()
 
+one_hot = lambda x:F.one_hot(x-1,len(SUBCLASSES))
+
 data_energies = []
-for img,label in train_dataset:
-    data = torch.cat((img.flatten(1),label.flatten(1)),1)
+for img,label in subdataset:
+    data = torch.cat((torch.tensor(img).flatten(0),one_hot(torch.LongTensor([int(label)])).flatten(0)),0)
     data_energies.append(rbm.free_energy(data).item())
 
 gibbs_energies = []
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
-for img,label in train_dataset:
-    data = torch.cat((img.flatten(1),label.flatten(1)),1)
+for img,label in subdataset:
+    data = torch.cat((torch.tensor(img).flatten(0),one_hot(torch.LongTensor([int(label)])).flatten(0)),0)
     prob_v,prob_h = gibbs_sampler(data,k=5)
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
 qa_energies = []
-qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver="Advantage_system1.1")
-qa_sampleset = qa_sampler(num_reads=1000)
+qa_sampleset = qa_sampler(num_reads=1000,auto_scale=False)
 for s_v,s_h in zip(*qa_sampleset):
     qa_energies.append(rbm.free_energy(s_v.detach()).item())
-
-pcd_energies = []
-pcd_sampler = qaml.sampler.PersistentGibbsNetworkSampler(rbm,BATCH_SIZE)
-pcd_sampleset = pcd_sampler(BATCH_SIZE,k=1)
-for s_v,s_h in zip(*pcd_sampleset):
-    pcd_energies.append(rbm.free_energy(s_v).item())
-
 
 import matplotlib
 import numpy as np
@@ -248,7 +242,6 @@ weights = lambda data: np.ones_like(data)/len(data)
 plt.hist(rand_energies,weights=weights(rand_energies),label="Random",color='r',**hist_kwargs)
 plt.hist(data_energies,weights=weights(data_energies), label="Data", color='b', **hist_kwargs)
 plt.hist(gibbs_energies,weights=weights(gibbs_energies),label="Gibbs-1",color='g',**hist_kwargs)
-plt.hist(pcd_energies,weights=weights(pcd_energies),label="PCD-1",color='purple',**hist_kwargs)
 plt.hist(qa_energies,weights=weights(qa_energies),label="QA",color='orange', **hist_kwargs)
 
 plt.legend(loc='upper right')
