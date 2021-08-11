@@ -7,6 +7,7 @@
 # Required packages
 import qaml
 import torch
+torch.manual_seed(0) # For deterministic weights
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
@@ -29,8 +30,7 @@ momentum = 0.5
 train_dataset = qaml.datasets.BAS(*SHAPE,transform=torch_transforms.ToTensor())
 train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=True,
                                                num_samples=SAMPLES)
-train_loader = torch.utils.data.DataLoader(train_dataset,
-                                           sampler=train_sampler,
+train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
 
 # PLot all data
@@ -41,8 +41,9 @@ plt.tight_layout()
 
 # %%
 ################################# Model Definition #############################
-# Specify model with dimensions
+# Trainable inverse temperature
 beta = torch.nn.Parameter(torch.tensor(1.5), requires_grad=True)
+# Specify model with dimensions
 rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE,beta=beta)
 
 # Initialize biases
@@ -52,14 +53,13 @@ torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 
 # Set up optimizers
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
-                            weight_decay=weight_decay, momentum=momentum)
-
+                            weight_decay=weight_decay,momentum=momentum)
+# Separate optimizer for inverse temperature
 beta_optimizer = torch.optim.SGD([beta],lr=0.01)
 
 # Set up training mechanisms
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,
-                                                         solver=solver_name)
+qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver=solver_name)
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 betaGrad = qaml.autograd.AdaptiveBeta()
 
@@ -70,14 +70,13 @@ rbm.train()
 err_log = []
 scalar_log = []
 err_beta_log = []
-beta_log = [beta.detach().clone().item()]
-b_log = [rbm.b.detach().clone().numpy()]
-c_log = [rbm.c.detach().clone().numpy()]
-W_log = [rbm.W.detach().clone().numpy().flatten()]
+beta_log = [beta.item()]
+b_log = [rbm.b.detach().numpy()]
+c_log = [rbm.c.detach().numpy()]
+W_log = [rbm.W.detach().numpy().flatten()]
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
     epoch_error_beta = torch.Tensor([0.])
-
     for img_batch, labels_batch in train_loader:
         input_data = img_batch.flatten(1)
 
@@ -101,16 +100,16 @@ for t in range(EPOCHS):
         # Update parameters
         optimizer.step()
         beta_optimizer.step()
-        
+
         #Accumulate error for this epoch
         epoch_error  += err
         epoch_error_beta  += err_beta
 
     # Error Log
-    beta_log.append(beta.detach().clone().item())
-    b_log.append(rbm.b.detach().clone().numpy())
-    c_log.append(rbm.c.detach().clone().numpy())
-    W_log.append(rbm.W.detach().clone().numpy().flatten())
+    beta_log.append(beta.item())
+    b_log.append(rbm.b.detach().numpy())
+    c_log.append(rbm.c.detach().numpy())
+    W_log.append(rbm.W.detach().numpy().flatten())
     err_log.append(epoch_error.item())
     scalar_log.append(qa_sampler.scalar)
     err_beta_log.append(epoch_error_beta.item())

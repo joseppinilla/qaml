@@ -1,5 +1,5 @@
 # %% markdown
-# # Classical RBM training on the Bars-And-Stripes Dataset for Reconstruction
+# # CLassical RBM training on the Bars-And-Stripes Dataset for Reconstruction
 # This is an example on classical Gibbs training of an RBM on the BAS(4,4)
 # dataset.
 # Developed by: Jose Pinilla
@@ -7,6 +7,7 @@
 # Required packages
 import qaml
 import torch
+torch.manual_seed(0) # For deterministic weights
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
@@ -29,10 +30,7 @@ momentum = 0.5
 train_dataset = qaml.datasets.BAS(*SHAPE,transform=torch_transforms.ToTensor())
 train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=True,
                                                num_samples=SAMPLES)
-# Or just shuffle without new samples:
-# train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
-train_loader = torch.utils.data.DataLoader(train_dataset,
-                                           sampler=train_sampler,
+train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
 
 # PLot all data
@@ -46,24 +44,27 @@ plt.tight_layout()
 # Specify model with dimensions
 rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
 
+# Initialize biases
+torch.nn.init.uniform_(rbm.b,-0.1,0.1)
+torch.nn.init.uniform_(rbm.c,-0.1,0.1)
+torch.nn.init.uniform_(rbm.W,-0.1,0.1)
+
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
-                            weight_decay=weight_decay,
-                            momentum=momentum)
+                            weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
-CD = qaml.autograd.SampleBasedConstrastiveDivergence() # L1 loss
-# CD = qaml.autograd.ConstrastiveDivergence() # MSE loss
+CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 
 # %%
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
 err_log = []
-b_log = [rbm.b.detach().clone().numpy()]
-c_log = [rbm.c.detach().clone().numpy()]
-W_log = [rbm.W.detach().clone().numpy().flatten()]
+b_log = [rbm.b.detach().numpy()]
+c_log = [rbm.c.detach().numpy()]
+W_log = [rbm.W.detach().numpy().flatten()]
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
     for img_batch, labels_batch in train_loader:
