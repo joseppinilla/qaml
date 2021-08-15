@@ -41,10 +41,8 @@ plt.tight_layout()
 
 # %%
 ################################# Model Definition #############################
-# Trainable inverse temperature
-beta = torch.nn.Parameter(torch.tensor(1.5), requires_grad=True)
 # Specify model with dimensions
-rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE,beta=beta)
+rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE)
 
 # Initialize biases
 torch.nn.init.uniform_(rbm.b,-0.1,0.1)
@@ -54,12 +52,16 @@ torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 # Set up optimizers
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
-# Separate optimizer for inverse temperature
+
+# Trainable inverse temperature with separate optimizer
+beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
 beta_optimizer = torch.optim.SGD([beta],lr=0.01)
 
 # Set up training mechanisms
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver=solver_name)
+qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+
+# Loss and autograd
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 betaGrad = qaml.autograd.AdaptiveBeta()
 
@@ -81,19 +83,19 @@ for t in range(EPOCHS):
         input_data = img_batch.flatten(1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data)
+        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.beta)
         # Negative Phase
         vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
-        err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta) #TODO: use sampleset Energies?
+        err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta)
 
         # Do not accumulate gradients
         optimizer.zero_grad()
         beta_optimizer.zero_grad()
 
-        # Compute gradients. Save compute graph at last epoch
+        # Compute gradients
         err.backward()
         err_beta.backward()
 

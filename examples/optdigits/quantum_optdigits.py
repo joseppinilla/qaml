@@ -80,15 +80,15 @@ torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
-# Trainable inverse temperature
+# Trainable inverse temperature with separate optimizer
 beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
-# Separate optimizer for inverse temperature
 beta_optimizer = torch.optim.SGD([beta],lr=0.01)
 
 # Set up training mechanisms
 solver_name = "Advantage_system1.1"
 qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
 
+# Loss and autograd
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 betaGrad = qaml.autograd.AdaptiveBeta()
 
@@ -113,8 +113,7 @@ for t in range(EPOCHS):
 
         # Positive Phase
         v0,prob_h0 = input_data,rbm(input_data,scale=qa_sampler.beta)
-
-        # Negative Phase. Updates scalar
+        # Negative Phase
         vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
 
         # Reconstruction error from Contrastive Divergence
@@ -125,7 +124,7 @@ for t in range(EPOCHS):
         optimizer.zero_grad()
         beta_optimizer.zero_grad()
 
-        # Compute gradients. Save compute graph at last epoch
+        # Compute gradients
         err.backward()
         err_beta.backward()
 
