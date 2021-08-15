@@ -43,8 +43,7 @@ plt.tight_layout()
 # %%
 ################################# Model Definition #############################
 # Specify model with dimensions
-beta = torch.nn.Parameter(torch.tensor(1.5), requires_grad=True)
-rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE,beta=beta)
+rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE)
 
 # Initialize biases
 torch.nn.init.uniform_(rbm.b,-0.1,0.1)
@@ -55,12 +54,12 @@ torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay, momentum=momentum)
 
+beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
 beta_optimizer = torch.optim.SGD([beta],lr=0.01)
 
 # Set up training mechanisms
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,
-                                                         solver=solver_name)
+qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 betaGrad = qaml.autograd.AdaptiveBeta()
 
@@ -75,7 +74,7 @@ beta_log = [beta.detach().clone().item()]
 b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
-for t in range(EPOCHS):
+for t in range(20):
     epoch_error = torch.Tensor([0.])
     epoch_error_beta = torch.Tensor([0.])
 
@@ -83,7 +82,7 @@ for t in range(EPOCHS):
         input_data = img_batch.flatten(1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data)
+        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.beta)
         # Negative Phase
         vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
 
@@ -101,7 +100,7 @@ for t in range(EPOCHS):
 
         # Update parameters
         optimizer.step()
-        beta_optimizer.step()
+        # beta_optimizer.step()
 
         #Accumulate error for this epoch
         epoch_error  += err
@@ -116,9 +115,9 @@ for t in range(EPOCHS):
     scalar_log.append(qa_sampler.scalar)
     err_beta_log.append(epoch_error_beta.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
-    print(f"Beta = {rbm.beta}")
+    print(f"Beta = {qa_sampler.beta}")
     print(f"Alpha = {qa_sampler.scalar}")
-    print(f"Effective Beta = {rbm.beta*qa_sampler.scalar}")
+    print(f"Effective Beta = {qa_sampler.beta*qa_sampler.scalar}")
 
 # Set the model to evaluation mode
 # rbm.eval()

@@ -13,10 +13,16 @@ import dwave_networkx as dnx
 from minorminer.utils.polynomialembedder import processor
 
 class NetworkSampler(torch.nn.Module):
+    r""" Sample generator for the probabilistic model provided.
+    Args:
+        model (e.g BotlzmannMachine): Generative Network Model
+        beta (float, optional): Inverse temperature for the distribution.
+    """
 
     scalar : float
+    beta : float # Inverse-temperature
 
-    def __init__(self, model):
+    def __init__(self, model, beta=1.0):
         super(NetworkSampler, self).__init__()
         self.model = model
         # Sampler stores states
@@ -25,6 +31,11 @@ class NetworkSampler(torch.nn.Module):
 
         hidden_unknown = torch.Tensor([float('NaN')]*model.H)
         self.prob_h = torch.nn.Parameter(hidden_unknown, requires_grad=False)
+
+        if torch.is_tensor(beta):
+            self.register_buffer('beta', beta)
+        else:
+            self.beta = beta
 
     @property
     def binary_quadratic_model(self):
@@ -129,7 +140,7 @@ class ExactNetworkSampler(NetworkSampler,dimod.ExactSolver):
         dimod.ExactSolver.__init__(self)
 
     def forward(self, num_reads=100, **ex_kwargs):
-        beta = self.model.beta
+        beta = self.beta
         bqm = self.binary_quadratic_model
         solutions = self.sample(bqm,**ex_kwargs)
 
@@ -156,9 +167,9 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
 
-    def __init__(self, model, embedding=None,
+    def __init__(self, model, embedding=None, beta=1.0,
                  failover=False, retry_interval=-1, **config):
-        NetworkSampler.__init__(self,model)
+        NetworkSampler.__init__(self,model,beta=beta)
         dwave.system.DWaveSampler.__init__(self,failover,retry_interval,**config)
         self.networkx_graph = self.to_networkx_graph()
         self.sampleset = None
@@ -186,7 +197,7 @@ class QuantumAnnealingNetworkSampler(NetworkSampler,dwave.system.DWaveSampler):
                          'quadratic_range':self.properties['j_range']}
             self.scalar = bqm.normalize(**norm_args)
         else:
-            bqm.scale(1.0/float(self.model.beta))
+            bqm.scale(1.0/float(self.beta))
 
         target_bqm = self.embedding.embed_bqm(bqm, **embed_kwargs)
 
@@ -369,7 +380,7 @@ class AdachiQASampler(QASampler):
                          'quadratic_range':self.properties['j_range']}
             self.scalar = target_bqm.normalize(**norm_args)
         else:
-            target_bqm.scale(1.0/float(self.model.beta))
+            target_bqm.scale(1.0/float(self.beta))
 
         self.target_bqm = target_bqm
 
@@ -495,7 +506,7 @@ class AdaptiveQASampler(QASampler):
                          'quadratic_range':self.properties['j_range']}
             self.scalar = target_bqm.normalize(**norm_args)
         else:
-            target_bqm.scale(1.0/float(self.model.beta))
+            target_bqm.scale(1.0/float(self.beta))
 
         self.target_bqm = target_bqm
 

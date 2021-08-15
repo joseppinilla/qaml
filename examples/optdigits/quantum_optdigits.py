@@ -69,8 +69,7 @@ VISIBLE_SIZE = DATA_SIZE + LABEL_SIZE
 HIDDEN_SIZE = 16
 
 # Specify model with dimensions
-beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
-rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE,beta=beta)
+rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE)
 
 # Initialize biases
 torch.nn.init.uniform_(rbm.b,-0.1,0.1)
@@ -81,15 +80,14 @@ torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
+beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
 beta_optimizer = torch.optim.SGD([beta],lr=0.01)
 
 # Set up training mechanisms
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name)
+qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver=solver_name,beta=beta)
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 betaGrad = qaml.autograd.AdaptiveBeta()
-
-qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
 
 # %%
 ################################## Model Training ##############################
@@ -103,7 +101,7 @@ beta_log = [beta.detach().clone().item()]
 b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
-for t in range(50):
+for t in range(25):
     epoch_error = torch.Tensor([0.])
     epoch_error_beta = torch.Tensor([0.])
 
@@ -111,7 +109,7 @@ for t in range(50):
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
         # Positive Phase
-        v0,prob_h0 = input_data,rbm(input_data)
+        v0,prob_h0 = input_data,rbm(input_data,scale=qa_sampler.beta)
         # Negative Phase
         vk,prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
 
@@ -144,8 +142,8 @@ for t in range(50):
     scalar_log.append(qa_sampler.scalar)
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
     print(f"Alpha = {qa_sampler.scalar}")
-    print(f"Beta = {rbm.beta}")
-    print(f"Effective Beta = {rbm.beta*qa_sampler.scalar}")
+    print(f"Beta = {qa_sampler.beta}")
+    print(f"Effective Beta = {qa_sampler.beta*qa_sampler.scalar}")
     ############################## CLASSIFICATION ##################################
     count = 0
     for i,(test_data, test_label) in enumerate(test_loader):
@@ -156,32 +154,28 @@ for t in range(50):
     accuracy_log.append(count/len(test_idx))
     print(f"Testing accuracy: {count}/{len(test_idx)} ({count/len(test_idx):.2f})")
 
-qa_sampler.embedding
-torch.save(accuracy_log,"accuracy_adachi.pt")
 
 plt.plot(accuracy_log)
 plt.ylabel("Testing Accuracy")
 plt.xlabel("Epoch")
-plt.savefig("accuracy_adachi.pdf")
+plt.savefig("accuracy.pdf")
 
 # Beta graph
 plt.plot(beta_log)
 plt.ylabel("Beta")
 plt.xlabel("Epoch")
 
-qa_sampler.embedding
-list(qa_sampler.embedding.interaction_edges(44,75))
 # Beta error graph
 plt.plot(err_beta_log)
 plt.ylabel("Beta Error")
 plt.xlabel("Epoch")
-plt.savefig("beta_err_adachi.pdf")
+plt.savefig("beta_err.pdf")
 
 # Error graph
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-plt.savefig("err_adachi.pdf")
+plt.savefig("err.pdf")
 
 # Visible bias graph
 ax = plt.gca()
