@@ -1,5 +1,5 @@
 # %% markdown
-# # CLassical RBM training on the Bars-And-Stripes Dataset for Reconstruction
+# # Classical RBM training on the Bars-And-Stripes Dataset for Reconstruction
 # This is an example on classical Gibbs training of an RBM on the BAS(4,4)
 # dataset.
 # Developed by: Jose Pinilla
@@ -62,9 +62,9 @@ CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 # Set the model to training mode
 rbm.train()
 err_log = []
-b_log = [rbm.b.detach().numpy()]
-c_log = [rbm.c.detach().numpy()]
-W_log = [rbm.W.detach().numpy().flatten()]
+b_log = [rbm.b.detach().clone().numpy()]
+c_log = [rbm.c.detach().clone().numpy()]
+W_log = [rbm.W.detach().clone().numpy().flatten()]
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
     for img_batch, labels_batch in train_loader:
@@ -118,7 +118,7 @@ print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 k = 10
 count = 0
 
-mask = torch_transforms.functional.erase(torch.ones(1,*SHAPE),i=1,j=1,h=2,w=2,v=0).flatten()
+mask = torch_transforms.functional.erase(torch.ones(1,M,N),1,1,2,2,0).flatten()
 for img, label in train_dataset:
 
     clamped = mask*img.flatten(1)
@@ -165,8 +165,6 @@ plt.savefig("classical_c_log.pdf")
 fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',rbm.V*rbm.H).colors))
 lc_w = plt.plot(W_log)
-labels = [f'W{i}' for i in range(rbm.V*rbm.H)]
-plt.legend(lc_w,labels,ncol=10,bbox_to_anchor=(1,1))
 plt.ylabel("Weights")
 plt.xlabel("Epoch")
 
@@ -189,7 +187,6 @@ for img,label in train_dataset:
     data = img.flatten(1)
     prob_v,prob_h = gibbs_sampler(data,k=5)
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
-
 
 qa_energies = []
 solver_name = "Advantage_system1.1"

@@ -53,72 +53,53 @@ torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
-# Trainable inverse temperature with separate optimizer
-beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
-beta_optimizer = torch.optim.SGD([beta],lr=0.01)
-
 # Set up training mechanisms
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=2.5)
 
 # Loss and autograd
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
-betaGrad = qaml.autograd.AdaptiveBeta()
 
 # %%
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
 err_log = []
-scalar_log = []
-err_beta_log = []
-beta_log = [beta.item()]
-b_log = [rbm.b.detach().numpy()]
-c_log = [rbm.c.detach().numpy()]
-W_log = [rbm.W.detach().numpy().flatten()]
+b_log = [rbm.b.detach().clone().numpy()]
+c_log = [rbm.c.detach().clone().numpy()]
+W_log = [rbm.W.detach().clone().numpy().flatten()]
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
-    epoch_error_beta = torch.Tensor([0.])
+
     for img_batch, labels_batch in train_loader:
         input_data = img_batch.flatten(1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.beta)
+        v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
-        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
+        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=False)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
-        err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta)
 
         # Do not accumulate gradients
         optimizer.zero_grad()
-        beta_optimizer.zero_grad()
 
         # Compute gradients
         err.backward()
-        err_beta.backward()
 
         # Update parameters
         optimizer.step()
-        beta_optimizer.step()
 
         #Accumulate error for this epoch
         epoch_error  += err
-        epoch_error_beta  += err_beta
 
     # Error Log
-    beta_log.append(beta.item())
-    b_log.append(rbm.b.detach().numpy())
-    c_log.append(rbm.c.detach().numpy())
-    W_log.append(rbm.W.detach().numpy().flatten())
+    b_log.append(rbm.b.detach().clone().numpy())
+    c_log.append(rbm.c.detach().clone().numpy())
+    W_log.append(rbm.W.detach().clone().numpy().flatten())
     err_log.append(epoch_error.item())
-    scalar_log.append(qa_sampler.scalar)
-    err_beta_log.append(epoch_error_beta.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
-    print(f"Beta = {rbm.beta}")
-    print(f"Alpha = {qa_sampler.scalar}")
-    print(f"Effective Beta = {rbm.beta*qa_sampler.scalar}")
 
 # Set the model to evaluation mode
 # rbm.eval()
@@ -138,10 +119,12 @@ plt.tight_layout()
 p,r,score = train_dataset.score(img_samples)
 print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 
+# %%
 ############################## RECONSTRUCTION ##################################
 k = 10
 count = 0
-mask = torch_transforms.functional.erase(torch.ones(SHAPE),1,1,2,2,0).flatten()
+
+mask = torch_transforms.functional.erase(torch.ones(1,M,N),1,1,2,2,0).flatten()
 for img, label in train_dataset:
 
     clamped = mask*img.flatten(1)
@@ -155,25 +138,10 @@ for img, label in train_dataset:
 
     if recon.equal(img):
         count+=1
-
 print(f"Dataset Reconstruction: {count/len(train_dataset):.02}")
 
+# %%
 ############################ MODEL VISUALIZATION ###############################
-
-# Beta graph
-plt.plot(beta_log)
-plt.ylabel("Beta")
-plt.xlabel("Epoch")
-
-# Scalar graph
-plt.plot(scalar_log)
-plt.ylabel("Scalar")
-plt.xlabel("Epoch")
-
-# Beta error graph
-plt.plot(err_beta_log)
-plt.ylabel("Beta Error")
-plt.xlabel("Epoch")
 
 # L1 error graph
 plt.plot(err_log)
@@ -203,18 +171,22 @@ plt.savefig("quantum_c_log.pdf")
 fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',rbm.V*rbm.H).colors))
 lc_w = plt.plot(W_log)
-plt.legend(lc_w,[f'W{i}' for i in range(rbm.V*rbm.H)],ncol=10,bbox_to_anchor=(1,1))
 plt.ylabel("Weights")
 plt.xlabel("Epoch")
+plt.savefig("quantum_W_log.pdf")
 
+# %%
 ################################## ENERGY ######################################
-rand_data = torch.rand(len(train_dataset)*10,rbm.V)
-rand_energies = rbm.free_energy(rand_data.bernoulli()).detach().numpy()
 
 data_energies = []
 for img,label in train_dataset:
     data = img.flatten(1)
     data_energies.append(rbm.free_energy(data).item())
+
+rand_energies = []
+rand_data = torch.rand(len(train_dataset)*10,rbm.V)
+for img in rand_data:
+    rand_energies.append(rbm.free_energy(img.bernoulli()).item())
 
 gibbs_energies = []
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
@@ -224,26 +196,24 @@ for img,label in train_dataset:
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
 qa_energies = []
-qa_sampleset = qa_sampler(num_reads=1000,auto_scale=True)
+qa_sampleset = qa_sampler(num_reads=1000,auto_scale=False)
 for s_v,s_h in zip(*qa_sampleset):
     qa_energies.append(rbm.free_energy(s_v.detach()).item())
 
+plot_data = [(data_energies,  'Data',    'blue'),
+             (rand_energies,  'Random',  'red'),
+             (gibbs_energies, 'Gibbs-5', 'green'),
+             (qa_energies,    'Quantum', 'orange')]
 
-import matplotlib
-import numpy as np
 hist_kwargs = {'ec':'k','lw':2.0,'alpha':0.5,'histtype':'stepfilled','bins':100}
-matplotlib.rcParams.update({'font.size': 22})
-weights = lambda data: np.ones_like(data)/len(data)
+weights = lambda data: [1./len(data) for _ in data]
 
-plt.hist(rand_energies,weights=weights(rand_energies),label="Random",color='r',**hist_kwargs)
-plt.hist(data_energies,weights=weights(data_energies), label="Data", color='b', **hist_kwargs)
-plt.hist(gibbs_energies,weights=weights(gibbs_energies),label="Gibbs-1",color='g',**hist_kwargs)
-plt.hist(qa_energies,weights=weights(qa_energies),label="QA",color='orange', **hist_kwargs)
+for data,name,color in plot_data:
+    plt.hist(data,weights=weights(data),label=name,color=color,**hist_kwargs)
 
-plt.legend(loc='upper right')
-plt.ylim(0.0,0.05)
-plt.ylabel("Count/Total")
 plt.xlabel("Energy")
+plt.ylabel("Count/Total")
+plt.legend(loc='upper right')
 plt.savefig("quantum_energies.pdf")
 
 ################################## VISUALIZE ###################################
