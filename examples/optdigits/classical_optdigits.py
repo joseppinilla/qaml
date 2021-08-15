@@ -169,11 +169,9 @@ plt.savefig("classical_hidden_bias_log.pdf")
 fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE*DATA_SIZE).colors))
 lc_w = plt.plot(W_log)
-plt.legend(lc_w,[f'w{i},{j}' for j in range(HIDDEN_SIZE) for i in range(DATA_SIZE)],ncol=4,bbox_to_anchor=(1,1))
 plt.ylabel("Weights")
 plt.xlabel("Epoch")
 plt.savefig("classical_weights_log.pdf")
-
 
 # %%
 ################################## VISUALIZE ###################################

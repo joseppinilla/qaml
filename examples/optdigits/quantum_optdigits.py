@@ -80,17 +80,12 @@ torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
-# Trainable inverse temperature with separate optimizer
-beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
-beta_optimizer = torch.optim.SGD([beta],lr=0.01)
-
 # Set up training mechanisms
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=2.5)
 
 # Loss and autograd
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
-betaGrad = qaml.autograd.AdaptiveBeta()
 
 # %%
 ################################## Model Training ##############################
@@ -98,15 +93,12 @@ betaGrad = qaml.autograd.AdaptiveBeta()
 rbm.train()
 err_log = []
 scalar_log = []
-err_beta_log = []
 accuracy_log = []
-beta_log = [beta.detach().clone().item()]
 b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
-    epoch_error_beta = torch.Tensor([0.])
 
     for img_batch, labels_batch in train_loader:
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
@@ -118,36 +110,26 @@ for t in range(EPOCHS):
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
-        err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta)
 
         # Do not accumulate gradients
         optimizer.zero_grad()
-        beta_optimizer.zero_grad()
 
         # Compute gradients
         err.backward()
-        err_beta.backward()
 
         # Update parameters
         optimizer.step()
-        # beta_optimizer.step()
 
         #Accumulate error for this epoch
         epoch_error  += err
-        epoch_error_beta  += err_beta
 
     # Error Log
     b_log.append(rbm.b.detach().clone().numpy())
     c_log.append(rbm.c.detach().clone().numpy())
     W_log.append(rbm.W.detach().clone().numpy().flatten())
     err_log.append(epoch_error.item())
-    err_beta_log.append(epoch_error_beta.item())
-    beta_log.append(beta.detach().clone().item())
     scalar_log.append(qa_sampler.scalar)
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
-    print(f"Alpha = {qa_sampler.scalar}")
-    print(f"Beta = {qa_sampler.beta}")
-    print(f"Effective Beta = {qa_sampler.beta*qa_sampler.scalar}")
     ############################## CLASSIFICATION ##################################
     count = 0
     for i,(test_data, test_label) in enumerate(test_loader):
@@ -168,19 +150,12 @@ plt.ylabel("Testing Accuracy")
 plt.xlabel("Epoch")
 plt.savefig("quantum_accuracy.pdf")
 
-# Beta graph
+# Scalar graph
 fig, ax = plt.subplots()
-plt.plot(beta_log)
-plt.ylabel("Beta")
+plt.plot(scalar_log)
+plt.ylabel("Alpha")
 plt.xlabel("Epoch")
-plt.savefig("beta.pdf")
-
-# Beta error graph
-fig, ax = plt.subplots()
-plt.plot(err_beta_log)
-plt.ylabel("Beta Error")
-plt.xlabel("Epoch")
-plt.savefig("beta_err.pdf")
+plt.savefig("alpha.pdf")
 
 # Error graph
 fig, ax = plt.subplots()
