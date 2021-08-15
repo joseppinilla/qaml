@@ -7,7 +7,7 @@
 # Required packages
 import qaml
 import torch
-import itertools
+torch.manual_seed(0) # For deterministic weights
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -49,7 +49,6 @@ for ax,(img,label) in zip(axs.flat,subdataset):
     ax.set_title(int(label))
     ax.axis('off')
 plt.tight_layout()
-
 
 test_dataset = qaml.datasets.OptDigits(root='./data/', train=False,
                                     transform=torch_transforms.Compose([
@@ -104,10 +103,11 @@ for t in range(EPOCHS):
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
 
-        # Do not accumulate gradients
+        # Do not accumulated gradients
         optimizer.zero_grad()
+
         # Compute gradients. Save compute graph at last epoch
-        err.backward(retain_graph = (t==EPOCHS-1))
+        err.backward()
 
         # Update parameters
         optimizer.step()
@@ -133,11 +133,12 @@ for t in range(EPOCHS):
 # %%
 ############################ MODEL VISUALIZATION ###############################
 
-# Accuracy graph
+# Testing accuracy graph
 fig, ax = plt.subplots()
 ax.plot(accuracy_log)
 plt.ylabel("Testing Accuracy")
 plt.xlabel("Epoch")
+plt.savefig("classical_accuracy.pdf")
 
 # L1 error graph
 fig, ax = plt.subplots()
@@ -173,47 +174,6 @@ plt.ylabel("Weights")
 plt.xlabel("Epoch")
 plt.savefig("classical_weights_log.pdf")
 
-# %%
-################################## ENERGY ######################################
-
-data_energies = []
-for img,label in subdataset:
-    data = torch.cat((torch.tensor(img).flatten(1),torch.tensor(label).flatten(1)),1)
-    data_energies.append(rbm.free_energy(data).item())
-
-rand_data = torch.rand(len(train_dataset)*10,rbm.V)
-rand_energies = rbm.free_energy(rand_data.bernoulli()).detach().numpy()
-
-gibbs_energies = []
-gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
-for img,label in train_dataset:
-    data = torch.cat((img.flatten(1),label.flatten(1)),1)
-    prob_v,prob_h = gibbs_sampler(data,k=5)
-    gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
-
-qa_energies = []
-qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver="Advantage_system1.1")
-qa_sampleset = qa_sampler(num_reads=1000,auto_scale=True)
-for s_v,s_h in zip(*qa_sampleset):
-    qa_energies.append(rbm.free_energy(s_v.detach()).item())
-
-import matplotlib
-import numpy as np
-%matplotlib qt
-hist_kwargs = {'ec':'k','lw':2.0,'alpha':0.5,'histtype':'stepfilled','bins':100}
-matplotlib.rcParams.update({'font.size': 22})
-weights = lambda data: np.ones_like(data)/len(data)
-
-plt.hist(rand_energies,weights=weights(rand_energies),label="Random",color='r',**hist_kwargs)
-plt.hist(data_energies,weights=weights(data_energies), label="Data", color='b', **hist_kwargs)
-plt.hist(gibbs_energies,weights=weights(gibbs_energies),label="Gibbs-1",color='g',**hist_kwargs)
-plt.hist(qa_energies,weights=weights(qa_energies),label="QA",color='orange', **hist_kwargs)
-
-plt.legend(loc='upper right')
-plt.ylim(0.0,0.05)
-plt.ylabel("Count/Total")
-plt.xlabel("Energy")
-plt.savefig("classical_energies.pdf")
 
 # %%
 ################################## VISUALIZE ###################################

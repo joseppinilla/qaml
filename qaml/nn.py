@@ -6,28 +6,23 @@ class BoltzmannMachine(torch.nn.Module):
     Args:
         V (int): The size of the visible layer.
         H (int): The size of the hidden layer.
-        beta (float, optional): Inverse temperature for the distribution.
     """
     V : int # Visible nodes
     H : int # Hidden nodes
-    beta : float # Inverse-temperature
 
-    def __init__(self, V, H, beta=1.0):
+    def __init__(self, V, H):
         super(BM, self).__init__()
         self.V = V
         self.H = H
-        if torch.is_tensor(beta):
-            self.register_buffer('beta', beta)
-        else:
-            self.beta = beta
 
     @property
     def matrix(self):
-        """A tirangular matrix representation of the network, this exists
+        """A triangular matrix representation of the network, this exists
         regardless of the topology. PyTorch doesn't have an efficient triangular
         matrix representation.
         """
-        return self._matrix
+        # TODO
+        return
 
     def energy(self, visible, hidden):
         # TODO using matrix
@@ -49,11 +44,10 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
     Args:
         V (int): The size of the visible layer.
         H (int): The size of the hidden layer.
-        beta (float, optional): Inverse temperature for the distribution.
     """
 
-    def __init__(self, V, H, beta=1.0):
-        super(RestrictedBoltzmannMachine, self).__init__(V,H,beta)
+    def __init__(self, V, H):
+        super(RestrictedBoltzmannMachine, self).__init__(V,H)
         # Visible linear bias
         self.b = torch.nn.Parameter(torch.ones(V)*0.5, requires_grad=True)
         # Hidden linear bias
@@ -68,29 +62,29 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         A[self.V:,:self.V] = self.W
         return A
 
-    def generate(self, hidden):
+    def generate(self, hidden, scale=1.0):
         """Sample from visible. P(V) = σ(HW^T + b)"""
-        return torch.sigmoid(F.linear(hidden, self.W.T, self.b)*self.beta)
+        return torch.sigmoid(F.linear(hidden, self.W.T, self.b)*scale)
 
-    def forward(self, visible):
+    def forward(self, visible, scale=1.0):
         """Sample from hidden. P(H) = σ(VW^T + c)"""
-        return torch.sigmoid(F.linear(visible, self.W, self.c)*self.beta)
+        return torch.sigmoid(F.linear(visible, self.W, self.c)*scale)
 
-    def energy(self, visible, hidden):
+    def energy(self, visible, hidden, scale=1.0):
         """Compute the Energy of a state or batch of states.
                 E(v,h) = -bV - cH - VW^TH
         Args:
-            visible (Tensor):
-            hidden (Tensor):
+            visible (Tensor): Input vector of size RBM.V
+            hidden (Tensor): Hidden node vector of size RBM.H
         """
         # Visible and Hidden contributions (D,V)·(V,1) + (D,H)·(H,1) -> (D,1)
         linear = torch.matmul(visible, self.b.T) + torch.matmul(hidden, self.c.T)
         # Quadratic contributions (D,V)·(V,H) -> (D,H)x(1,H) -> (D,H)
         quadratic = visible.matmul(self.W.T).mul(hidden)
         # sum_j((D,H)) -> (D,1)
-        return -self.beta*(linear + torch.sum(quadratic,dim=-1))
+        return -scale*(linear + torch.sum(quadratic,dim=-1))
 
-    def free_energy(self, visible):
+    def free_energy(self, visible, scale=1.0):
         """Also called "effective energy", this expression differs from energy
         in that the compounded contributions of the hidden units is added to the
         visible unit contributions. For one input vector:
@@ -107,31 +101,31 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         # Compounded Hidden contributions sum_j(log(exp(1 + (D,H)))) -> (D,1)
         second_term = torch.sum(F.softplus(vW_h),dim=-1)
 
-        return -self.beta*(first_term + second_term)
+        return -scale*(first_term + second_term)
 
-    def log_likelihood(self, *tensors):
-        """
-
+    def log_likelihood(self, *tensors, scale=1.0):
+        """ Compute the log-likelihood for a state or iterable of states
+            Warning: This function computes the partition function.
         """
         # Model
         N = self.V+self.H
         sequence = torch.tensor([0.,1.],requires_grad=False).repeat(N,1)
-        product = torch.cartesian_prod(*sequence)
-        model_energies = self.energy(*product.split([self.V,self.H],1))
+        all_states = torch.cartesian_prod(*sequence).split([self.V,self.H],1)
+        model_energies = self.energy(*all_states,scale=scale)
         model_term = torch.exp(-model_energies).sum().log()
         # Data
         h_sequence = torch.tensor([0.,1.],requires_grad=False).repeat(self.H,1)
         h_product = torch.cartesian_prod(*h_sequence)
         for visible in tensors:
             v_sequence = visible.repeat(len(h_product),1)
-            data_energies = self.energy(v_sequence,h_product)
+            data_energies = self.energy(v_sequence,h_product,scale=scale)
             data_term = torch.exp(-data_energies).sum().log()
             yield (data_term - model_term).item()
 
 RBM = RestrictedBoltzmannMachine
 
 class LimitedBoltzmannMachine(BoltzmannMachine):
-    """A Boltzmann Machine with added connections between visible-hidden
+    """ TODO: A Boltzmann Machine with added connections between visible-hidden
     and hidden-hidden units.
     """
     def __init__(self,V_in,H_out):
