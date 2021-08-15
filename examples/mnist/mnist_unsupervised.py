@@ -73,7 +73,7 @@ for t in range(EPOCHS):
         # Update parameters
         optimizer.step()
         epoch_error  += err
-    err_log.append(epoch_error)
+    err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
 
 plt.plot(err_log)
@@ -128,7 +128,7 @@ plt.legend()
 
 # %%
 ################################# VISIBLE ######################################
-plt.matshow(rbm.bv.detach().view(28, 28))
+plt.matshow(rbm.b.detach().view(28, 28))
 plt.colorbar()
 
 # %%
@@ -168,6 +168,7 @@ axs[0].matshow(input_data.view(28,28))
 axs[1].matshow(corrupt_data.view(28,28))
 axs[2].matshow(recon_data.detach().view(28,28))
 
+# %%
 ############################## RECONSTRUCTION ##################################
 input_data, label = train_loader.dataset[4]
 mask = torch.ones_like(input_data)
@@ -183,6 +184,12 @@ axs[0].matshow(input_data.view(28, 28))
 axs[1].matshow(corrupt_data.view(28, 28))
 axs[2].matshow(prob_vk.detach().view(28, 28))
 
+# %% markdown
+# Even though this model was trained unsupervised, it is possible to now use it
+# as a pre-trained model and "fit" its hidden layers and output and perform
+# training on that.
+
+# %%
 ############################### CLASSIFIER ####################################
 LABEL_SIZE = len(train_dataset.classes)
 

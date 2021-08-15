@@ -1,3 +1,7 @@
+# %% markdown
+# # This example does not use QAML
+
+# %%
 import torch
 
 import matplotlib.pyplot as plt

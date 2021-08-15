@@ -77,7 +77,7 @@ for t in range(EPOCHS):
         # Update parameters
         optimizer.step()
         epoch_error  += err
-    err_log.append(epoch_error)
+    err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
 
 plt.plot(err_log)
@@ -101,7 +101,6 @@ rbm = torch.load("mnist_unsupervised.pt")
 
 # %%
 ################################# ANIMATION ####################################
-%matplotlib qt
 from matplotlib.animation import FuncAnimation
 img = torch.zeros(1,DATA_SIZE)
 clamp = torch.nn.functional.one_hot(torch.LongTensor([3]),10)
