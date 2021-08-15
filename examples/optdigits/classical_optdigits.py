@@ -106,7 +106,7 @@ for t in range(EPOCHS):
         # Do not accumulated gradients
         optimizer.zero_grad()
 
-        # Compute gradients. Save compute graph at last epoch
+        # Compute gradients
         err.backward()
 
         # Update parameters

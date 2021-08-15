@@ -74,15 +74,14 @@ for t in range(EPOCHS):
         v0, prob_h0 = input_data, rbm(input_data)
         # Negative Phase
         vk, prob_hk = gibbs_sampler(v0.detach(), k=5)
-        # Or sample from random init
-        # vk, prob_hk = gibbs_sampler(0.1*torch.randn((500,rbm.V)), k=5)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
 
         # Do not accumulate gradients
         optimizer.zero_grad()
-        # Compute gradients. Save compute graph at last epoch
+
+        # Compute gradients
         err.backward()
 
         # Update parameters
@@ -194,8 +193,8 @@ for img,label in train_dataset:
 
 qa_energies = []
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.QuantumAnnealingNetworkSampler(rbm,solver=solver_name)
-qa_sampleset = qa_sampler(num_reads=1000,auto_scale=True)
+qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=2.5)
+qa_sampleset = qa_sampler(num_reads=1000,auto_scale=False)
 for s_v,s_h in zip(*qa_sampleset):
     qa_energies.append(rbm.free_energy(s_v.detach()).item())
 
