@@ -45,9 +45,9 @@ plt.tight_layout()
 rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
 
 # Initialize biases
-torch.nn.init.uniform_(rbm.b,-0.1,0.1)
-torch.nn.init.uniform_(rbm.c,-0.1,0.1)
-torch.nn.init.uniform_(rbm.W,-0.1,0.1)
+torch.nn.init.constant_(rbm.b,0.5)
+torch.nn.init.zeros_(rbm.c)
+torch.nn.init.uniform_(rbm.W,-0.5,0.5)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
@@ -101,9 +101,9 @@ for t in range(EPOCHS):
 
 # %%
 ################################## Sampling ####################################
-N = 1000
-prob_v,_ = gibbs_sampler(torch.rand(N,DATA_SIZE),k=10)
-img_samples = prob_v.view(N,*SHAPE).bernoulli()
+num_samples = 1000
+prob_v,_ = gibbs_sampler(torch.rand(num_samples,DATA_SIZE),k=10)
+img_samples = prob_v.view(num_samples,*SHAPE).bernoulli()
 # PLot some samples
 fig,axs = plt.subplots(4,5)
 for ax,img in zip(axs.flat,img_samples):
@@ -117,7 +117,6 @@ print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 ############################## RECONSTRUCTION ##################################
 k = 10
 count = 0
-
 mask = torch_transforms.functional.erase(torch.ones(1,M,N),1,1,2,2,0).flatten()
 for img, label in train_dataset:
 
