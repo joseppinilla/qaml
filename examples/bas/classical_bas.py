@@ -169,7 +169,6 @@ plt.xlabel("Epoch")
 
 # %%
 ################################## ENERGY ######################################
-
 data_energies = []
 for img,label in train_dataset:
     data = img.flatten(1)
@@ -202,8 +201,9 @@ plot_data = [(data_energies,  'Data',    'blue'),
 hist_kwargs = {'ec':'k','lw':2.0,'alpha':0.5,'histtype':'stepfilled','bins':100}
 weights = lambda data: [1./len(data) for _ in data]
 
+fig, ax = plt.subplots(figsize=(15,10))
 for data,name,color in plot_data:
-    plt.hist(data,weights=weights(data),label=name,color=color,**hist_kwargs)
+    ax.hist(data,weights=weights(data),label=name,color=color,**hist_kwargs)
 
 plt.xlabel("Energy")
 plt.ylabel("Count/Total")
@@ -212,14 +212,18 @@ plt.savefig("classical_energies.pdf")
 
 # %%
 ################################## VISUALIZE ###################################
-plt.matshow(rbm.b.detach().view(*SHAPE), cmap='viridis')
+plt.matshow(rbm.b.detach().view(*SHAPE))
 plt.colorbar()
 plt.savefig("classical_b.pdf")
+plt.matshow(rbm.c.detach().view(1,HIDDEN_SIZE))
+plt.yticks([])
+plt.colorbar()
+plt.savefig("classical_c.pdf")
 
 fig,axs = plt.subplots(HIDDEN_SIZE//4,4)
 for i,ax in enumerate(axs.flat):
     weight_matrix = rbm.W[i].detach().view(*SHAPE)
-    ms = ax.matshow(weight_matrix, cmap='viridis')
+    ms = ax.matshow(weight_matrix)
     ax.axis('off')
 fig.subplots_adjust(wspace=0.1, hspace=0.1)
 cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
