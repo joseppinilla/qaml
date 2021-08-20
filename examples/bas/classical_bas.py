@@ -1,5 +1,5 @@
 # %% markdown
-# # CLassical RBM training on the Bars-And-Stripes Dataset for Reconstruction
+# # Classical RBM training on the Bars-And-Stripes Dataset for Reconstruction
 # This is an example on classical Gibbs training of an RBM on the BAS(4,4)
 # dataset.
 # Developed by: Jose Pinilla
@@ -45,9 +45,9 @@ plt.tight_layout()
 rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
 
 # Initialize biases
-torch.nn.init.uniform_(rbm.b,-0.1,0.1)
-torch.nn.init.uniform_(rbm.c,-0.1,0.1)
-torch.nn.init.uniform_(rbm.W,-0.1,0.1)
+torch.nn.init.constant_(rbm.b,0.5)
+torch.nn.init.zeros_(rbm.c)
+torch.nn.init.uniform_(rbm.W,-0.5,0.5)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
@@ -62,9 +62,9 @@ CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 # Set the model to training mode
 rbm.train()
 err_log = []
-b_log = [rbm.b.detach().numpy()]
-c_log = [rbm.c.detach().numpy()]
-W_log = [rbm.W.detach().numpy().flatten()]
+b_log = [rbm.b.detach().clone().numpy()]
+c_log = [rbm.c.detach().clone().numpy()]
+W_log = [rbm.W.detach().clone().numpy().flatten()]
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
     for img_batch, labels_batch in train_loader:
@@ -101,9 +101,9 @@ for t in range(EPOCHS):
 
 # %%
 ################################## Sampling ####################################
-N = 1000
-prob_v,_ = gibbs_sampler(torch.rand(N,DATA_SIZE),k=10)
-img_samples = prob_v.view(N,*SHAPE).bernoulli()
+num_samples = 1000
+prob_v,_ = gibbs_sampler(torch.rand(num_samples,DATA_SIZE),k=10)
+img_samples = prob_v.view(num_samples,*SHAPE).bernoulli()
 # PLot some samples
 fig,axs = plt.subplots(4,5)
 for ax,img in zip(axs.flat,img_samples):
@@ -117,8 +117,7 @@ print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 ############################## RECONSTRUCTION ##################################
 k = 10
 count = 0
-
-mask = torch_transforms.functional.erase(torch.ones(1,*SHAPE),i=1,j=1,h=2,w=2,v=0).flatten()
+mask = torch_transforms.functional.erase(torch.ones(1,M,N),1,1,2,2,0).flatten()
 for img, label in train_dataset:
 
     clamped = mask*img.flatten(1)
@@ -165,14 +164,11 @@ plt.savefig("classical_c_log.pdf")
 fig, ax = plt.subplots()
 ax.set_prop_cycle('color', list(plt.get_cmap('turbo',rbm.V*rbm.H).colors))
 lc_w = plt.plot(W_log)
-labels = [f'W{i}' for i in range(rbm.V*rbm.H)]
-plt.legend(lc_w,labels,ncol=10,bbox_to_anchor=(1,1))
 plt.ylabel("Weights")
 plt.xlabel("Epoch")
 
 # %%
 ################################## ENERGY ######################################
-
 data_energies = []
 for img,label in train_dataset:
     data = img.flatten(1)
@@ -190,7 +186,6 @@ for img,label in train_dataset:
     prob_v,prob_h = gibbs_sampler(data,k=5)
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
-
 qa_energies = []
 solver_name = "Advantage_system1.1"
 qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=2.5)
@@ -206,8 +201,9 @@ plot_data = [(data_energies,  'Data',    'blue'),
 hist_kwargs = {'ec':'k','lw':2.0,'alpha':0.5,'histtype':'stepfilled','bins':100}
 weights = lambda data: [1./len(data) for _ in data]
 
+fig, ax = plt.subplots(figsize=(15,10))
 for data,name,color in plot_data:
-    plt.hist(data,weights=weights(data),label=name,color=color,**hist_kwargs)
+    ax.hist(data,weights=weights(data),label=name,color=color,**hist_kwargs)
 
 plt.xlabel("Energy")
 plt.ylabel("Count/Total")
@@ -216,14 +212,18 @@ plt.savefig("classical_energies.pdf")
 
 # %%
 ################################## VISUALIZE ###################################
-plt.matshow(rbm.b.detach().view(*SHAPE), cmap='viridis')
+plt.matshow(rbm.b.detach().view(*SHAPE))
 plt.colorbar()
 plt.savefig("classical_b.pdf")
+plt.matshow(rbm.c.detach().view(1,HIDDEN_SIZE))
+plt.yticks([])
+plt.colorbar()
+plt.savefig("classical_c.pdf")
 
 fig,axs = plt.subplots(HIDDEN_SIZE//4,4)
 for i,ax in enumerate(axs.flat):
     weight_matrix = rbm.W[i].detach().view(*SHAPE)
-    ms = ax.matshow(weight_matrix, cmap='viridis')
+    ms = ax.matshow(weight_matrix)
     ax.axis('off')
 fig.subplots_adjust(wspace=0.1, hspace=0.1)
 cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
