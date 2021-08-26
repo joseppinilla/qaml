@@ -54,7 +54,7 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
-beta = 2.5
+beta = 4.0
 solver_name = "Advantage_system1.1"
 qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
 
@@ -75,10 +75,11 @@ for t in range(EPOCHS):
     for img_batch, labels_batch in train_loader:
         input_data = img_batch.flatten(1)
 
-        # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.beta)
         # Negative Phase
-        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=False)
+        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
+        scale = qa_sampler.beta*qa_sampler.scalar
+        # Positive Phase
+        v0, prob_h0 = input_data, rbm(input_data,scale=scale)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -126,7 +127,7 @@ qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta,embedding=e
 
 # %%
 ################################# qBAS Score ###################################
-num_samples = 1000 # CLASSICAL
+num_samples = 1000
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
 prob_v,_ = gibbs_sampler(torch.rand(num_samples,DATA_SIZE),k=10)
 img_samples = prob_v.view(num_samples,*SHAPE).bernoulli()
@@ -143,10 +144,8 @@ print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 ############################## RECONSTRUCTION ##################################
 k = 10
 count = 0
-
 mask = torch_transforms.functional.erase(torch.ones(1,M,N),1,1,2,2,0).flatten()
 for img, label in train_dataset:
-
     clamped = mask*img.flatten(1)
     prob_hk = rbm.forward(clamped + (1-mask)*0.5)
     prob_vk = rbm.generate(prob_hk).detach()
@@ -155,7 +154,6 @@ for img, label in train_dataset:
         prob_hk.data = rbm.forward(masked).data
         prob_vk.data = rbm.generate(prob_hk).data
     recon = (clamped + (1-mask)*prob_vk).bernoulli().view(img.shape)
-
     if recon.equal(img):
         count+=1
 print(f"Dataset Reconstruction: {count/len(train_dataset):.02}")

@@ -29,21 +29,21 @@ momentum = 0.5
 # %%
 #################################### Input Data ################################
 train_dataset = qaml.datasets.OptDigits(root='./data/', train=True,
-                                     transform=torch_transforms.Compose([
-                                     torch_transforms.ToTensor(),
-                                     lambda x:(x>0.5).to(x.dtype)]), #Binarize
-                                     target_transform=torch_transforms.Compose([
-                                     lambda x:torch.LongTensor([x.astype(int)]),
-                                     lambda x:F.one_hot(x-1,len(SUBCLASSES))]),
-                                     download=True)
+                                    transform=torch_transforms.Compose([
+                                    torch_transforms.ToTensor(),
+                                    lambda x:(x>0.5).to(x.dtype)]), #Binarize
+                                    target_transform=torch_transforms.Compose([
+                                    lambda x:torch.LongTensor([x.astype(int)]),
+                                    lambda x:F.one_hot(x-1,len(SUBCLASSES))]),
+                                    download=True)
 
-train_idx = [i for i,y in enumerate(train_dataset.targets) if y in SUBCLASSES]
-sampler = torch.utils.data.SubsetRandomSampler(train_idx)
+tr_idx = [i for i,y in enumerate(train_dataset.targets) if y in SUBCLASSES]
+sampler = torch.utils.data.SubsetRandomSampler(tr_idx)
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE,
                                            sampler=sampler)
 
 fig,axs = plt.subplots(4,5)
-subdataset = zip(train_dataset.data[train_idx],train_dataset.targets[train_idx])
+subdataset = list(zip(train_dataset.data[tr_idx],train_dataset.targets[tr_idx]))
 for ax,(img,label) in zip(axs.flat,subdataset):
     ax.matshow(img>0.5)
     ax.set_title(int(label))
@@ -72,17 +72,18 @@ HIDDEN_SIZE = 16
 rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE)
 
 # Initialize biases
-torch.nn.init.uniform_(rbm.b,-0.1,0.1)
-torch.nn.init.uniform_(rbm.c,-0.1,0.1)
-torch.nn.init.uniform_(rbm.W,-0.1,0.1)
+torch.nn.init.constant_(rbm.c,0.5)
+torch.nn.init.zeros_(rbm.c)
+torch.nn.init.uniform_(rbm.W,-0.5,0.5)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
+beta = 2.5
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=2.5)
+qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
 
 # Loss and autograd
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
@@ -103,10 +104,11 @@ for t in range(EPOCHS):
     for img_batch, labels_batch in train_loader:
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
-        # Positive Phase
-        v0,prob_h0 = input_data,rbm(input_data,scale=qa_sampler.beta)
         # Negative Phase
         vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
+        scale = qa_sampler.beta*qa_sampler.scalar
+        # Positive Phase
+        v0,prob_h0 = input_data,rbm(input_data,scale=scale)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -189,6 +191,50 @@ lc_w = plt.plot(W_log)
 plt.ylabel("Weights")
 plt.xlabel("Epoch")
 plt.savefig("quantum_weights_log.pdf")
+
+# %%
+################################## ENERGY ######################################
+one_hot = lambda x:F.one_hot(x-1,len(SUBCLASSES)).flatten(0)
+
+data_energies = []
+for img,label in subdataset:
+    data = torch.cat((torch.tensor(img).flatten(0),one_hot(torch.LongTensor([int(label)]))),0)
+    data_energies.append(rbm.free_energy(data).item())
+
+rand_energies = []
+rand_data = torch.rand(len(tr_idx)*10,rbm.V)
+for img in rand_data:
+    rand_energies.append(rbm.free_energy(img.bernoulli()).item())
+
+gibbs_energies = []
+gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=beta)
+for img,label in subdataset:
+    data = torch.cat((torch.tensor(img).flatten(0),one_hot(torch.LongTensor([int(label)]))),0)
+    prob_v,prob_h = gibbs_sampler(data,k=5)
+    gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
+
+qa_energies = []
+qa_sampleset = qa_sampler(num_reads=1000,auto_scale=True)
+for s_v,s_h in zip(*qa_sampleset):
+    qa_energies.append(rbm.free_energy(s_v.detach()).item())
+
+plot_data = [(data_energies,  'Data',    'blue'),
+             (rand_energies,  'Random',  'red'),
+             (gibbs_energies, 'Gibbs-5', 'green'),
+             (qa_energies,    'Quantum', 'orange')]
+
+hist_kwargs = {'ec':'k','lw':2.0,'alpha':0.5,'histtype':'stepfilled','bins':100}
+weights = lambda data: [1./len(data) for _ in data]
+
+fig, ax = plt.subplots(figsize=(15,10))
+for data,name,color in plot_data:
+    ax.hist(data,weights=weights(data),label=name,color=color,**hist_kwargs)
+
+plt.xlabel("Energy")
+plt.ylabel("Count/Total")
+plt.legend(loc='upper right')
+plt.savefig("quantum_energies.pdf")
+
 
 # %%
 ################################## VISUALIZE ###################################

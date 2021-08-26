@@ -119,7 +119,6 @@ k = 10
 count = 0
 mask = torch_transforms.functional.erase(torch.ones(1,M,N),1,1,2,2,0).flatten()
 for img, label in train_dataset:
-
     clamped = mask*img.flatten(1)
     prob_hk = rbm.forward(clamped + (1-mask)*0.5)
     prob_vk = rbm.generate(prob_hk).detach()
@@ -128,7 +127,6 @@ for img, label in train_dataset:
         prob_hk.data = rbm.forward(masked).data
         prob_vk.data = rbm.generate(prob_hk).data
     recon = (clamped + (1-mask)*prob_vk).bernoulli().view(img.shape)
-
     if recon.equal(img):
         count+=1
 print(f"Dataset Reconstruction: {count/len(train_dataset):.02}")
