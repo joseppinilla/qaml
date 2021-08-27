@@ -1,3 +1,4 @@
+import copy
 import torch
 import dimod
 import warnings
@@ -6,6 +7,10 @@ import dwave.system
 import dwave.embedding
 
 import numpy as np
+import networkx as nx
+import dwave_networkx as dnx
+
+from minorminer.utils.polynomialembedder import processor
 
 class NetworkSampler(torch.nn.Module):
     r""" Sample generator for the probabilistic model provided.
@@ -97,6 +102,8 @@ class BinaryQuadraticModelSampler(NetworkSampler):
     _bqm = None
     _networkx_graph = None
 
+    sampleset = None
+
     def __init__(self, model, beta=1.0):
         super(BinaryQuadraticModelSampler, self).__init__(model,beta)
 
@@ -150,11 +157,12 @@ class SimulatedAnnealingNetworkSampler(dimod.SimulatedAnnealingSampler,
         bqm = self.to_binary_quadratic_model()
         bqm.scale(float(self.beta))
         sa_kwargs = {**self.sa_kwargs,**kwargs}
-        self.sampleset = self.sample(bqm,num_reads=num_reads,**sa_kwargs)
-        samples = self.sampleset.record.sample.copy()
+        sampleset = self.sample(bqm,num_reads=num_reads,**sa_kwargs)
+        samples = sampleset.record.sample.copy()
         sampletensor = torch.tensor(samples,dtype=torch.float32)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
+        self.sampleset = sampleset
         return samples_v, samples_h
 
 SASampler = SimulatedAnnealingNetworkSampler
@@ -168,8 +176,8 @@ class ExactNetworkSampler(dimod.ExactSolver,BinaryQuadraticModelSampler):
     def forward(self, num_reads=100, **ex_kwargs):
         beta = self.beta
         bqm = self.to_binary_quadratic_model()
-        solutions = self.sample(bqm,**ex_kwargs)
 
+        solutions = self.sample(bqm,**ex_kwargs)
         energies = solutions.record['energy']
         Z = np.exp(-beta*energies).sum()
         P = torch.Tensor(np.exp(-beta*energies/Z))
@@ -179,6 +187,7 @@ class ExactNetworkSampler(dimod.ExactSolver,BinaryQuadraticModelSampler):
         sampletensor = torch.Tensor(samples)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
+        self.sampleset = solutions
         return samples_v, samples_h
 
 class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
@@ -193,13 +202,14 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
 
+    embedding = None
+    target_bqm = None
+    target_sampleset = None
+
     def __init__(self, model, embedding=None, beta=1.0,
                  failover=False, retry_interval=-1, **config):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
         dwave.system.DWaveSampler.__init__(self,failover,retry_interval,**config)
-        self.sampleset = None
-        self.target_bqm = None
-        self.target_sampleset = None
         if embedding is None:
             if 'Restricted' in repr(self.model):
                 cache = minorminer.busclique.busgraph_cache(self.networkx_graph)
@@ -252,7 +262,152 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
         self.sampleset = sampleset
-
         return samples_v, samples_h
 
 QASampler = QuantumAnnealingNetworkSampler
+
+class AdachiQASampler(QASampler):
+    """ Prune (currently unpruned) units in a tensor from D-Wave graph using the
+    method in [1-2]. Prune only disconnected edges.
+
+    [1] Adachi, S. H., & Henderson, M. P. (2015). Application of Quantum
+    Annealing to Training of Deep Neural Networks.
+    https://doi.org/10.1038/nature10012
+
+    [2] Job, J., & Adachi, S. (2020). Systematic comparison of deep belief
+    network training using quantum annealing vs. classical techniques.
+    http://arxiv.org/abs/2009.00134
+
+    """
+
+    disjoint_chains : dict
+
+    embedding = None
+    embedding_orig = None
+
+    target_bqm = None
+    target_sampleset = None
+
+    def __init__(self, model, embedding=None, beta=1.0,
+                 failover=False, retry_interval=-1, **config):
+        QASampler.__init__(self,model,{},beta,failover,retry_interval,**config)
+
+        topology_type = self.properties['topology']['type']
+        shape = self.properties['topology']['shape']
+        if topology_type == 'pegasus':
+            self.template_graph = dnx.pegasus_graph(shape[0])
+            if embedding is None:
+                helper = minorminer.utils.pegasus._pegasus_fragment_helper
+                _embedder, _converter = helper(16, self.template_graph)
+                _left,_right = _embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
+                embedding = {**left,**{k+model.V:v for k,v in right.items()}}
+        elif topology_type == 'chimera':
+            self.template_graph = dnx.chimera_graph(*shape)
+            if embedding is None:
+                self.template_graph = dnx.chimera_graph(*shape)
+                embedder = processor(self.template_graph.edges(),M=16,N=16,L=4)
+                left,right = embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                embedding = {v:chain for v,chain in enumerate(left+right)}
+        else:
+            raise RuntimeError("Sampler `topology_type` not compatible.")
+        # Embedded structures have some useful methods
+        embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,embedding)
+        self.embedding_orig = copy.deepcopy(embedding)
+
+        # Create "sub-chains" to allow gaps in chains
+        new_embedding = {}
+        self.disjoint_chains = {}
+        for x in self.embedding_orig:
+            emb_x = self.embedding_orig[x]
+            chain_edges = self.embedding_orig._chain_edges[x]
+            # Very inneficient but does the job of creating chain subgraphs
+            chain_graph = nx.Graph()
+            chain_graph.add_nodes_from([v for v in emb_x if self.networkx_graph.has_node(v)])
+            chain_graph.add_edges_from([(emb_x[i],emb_x[j]) for i,j in chain_edges if self.networkx_graph.has_edge(emb_x[i],emb_x[j])])
+            chain_subgraphs = [chain_graph.subgraph(c) for c in nx.connected_components(chain_graph)]
+
+            if len(chain_subgraphs)>1:
+                for i,G in enumerate(chain_subgraphs):
+                    new_embedding[f'{x}_ADACHI_SUBCHAIN_{i}'] = tuple(G.nodes)
+                self.disjoint_chains[x] = len(chain_subgraphs)
+            elif len(chain_subgraphs)==1:
+                new_embedding[x] = list(chain_graph.nodes)
+            else:
+                raise RuntimeError(f"No subgraphs were found for chain: {x}")
+        self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
+
+    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
+        embedding = self.embedding
+        bqm = self.to_binary_quadratic_model().copy()
+        embed_kwargs = {**self.embed_kwargs,**kwargs}
+
+        if auto_scale:
+            # Same as target auto_scale but retains scalar
+            norm_args = {'bias_range':self.properties['h_range'],
+                         'quadratic_range':self.properties['j_range']}
+            self.scalar = bqm.normalize(**norm_args)
+        else:
+            bqm.scale(1.0/float(self.beta))
+
+        # Create new BQM including new subchains
+        chain_strength = embed_kwargs['chain_strength']
+        target_bqm = dimod.BinaryQuadraticModel.empty('BINARY')
+        for v, bias in bqm.linear.items():
+            if v in self.embedding:
+                chain = self.embedding[v]
+                b = bias / len(chain)
+                target_bqm.add_variables_from({u: b for u in chain})
+                # Values are adjusted as 'BINARY' type
+                for p, q in self.embedding.chain_edges(v):
+                    target_bqm.add_interaction(p, q, -4*chain_strength)
+                    target_bqm.add_variable(p, 2*chain_strength)
+                    target_bqm.add_variable(q, 2*chain_strength)
+            elif v in self.disjoint_chains:
+                disjoint_chain = []
+                for i in range(self.disjoint_chains[v]):
+                    v_sub = f'{v}_ADACHI_SUBCHAIN_{i}'
+                    disjoint_chain += [q for q in self.embedding[v_sub]]
+                    for p, q in self.embedding.chain_edges(v_sub):
+                        target_bqm.add_interaction(p, q, -4*chain_strength)
+                        target_bqm.add_variable(p, 2*chain_strength)
+                        target_bqm.add_variable(q, 2*chain_strength)
+                b = bias / len(disjoint_chain)
+                target_bqm.add_variables_from({u: b for u in disjoint_chain})
+            else:
+                raise MissingChainError(v)
+
+        target_bqm.add_offset(bqm.offset)
+
+        for (u, v), bias in bqm.quadratic.items():
+            if u in self.disjoint_chains:
+                interactions =  []
+                for i in range(self.disjoint_chains[u]):
+                    u_sub = f'{u}_ADACHI_SUBCHAIN_{i}'
+                    interactions+=list(self.embedding.interaction_edges(u_sub,v))
+            elif v in self.disjoint_chains:
+                interactions =  []
+                for i in range(self.disjoint_chains[v]):
+                    v_sub = f'{v}_ADACHI_SUBCHAIN_{i}'
+                    interactions+=list(self.embedding.interaction_edges(u,v_sub))
+            else:
+                interactions = list(self.embedding.interaction_edges(u,v))
+
+            if interactions:
+                b = bias / len(interactions)
+                target_bqm.add_interactions_from((u,v,b) for u,v in interactions)
+
+        return target_bqm
+
+    def unembed_sampleset(self, **kwargs):
+        unembed_kwargs = {**self.unembed_kwargs,**kwargs}
+
+        pruned_embedding = {v:(q for q in chain if q in self.networkx_graph)
+                            for v,chain in self.embedding_orig.items()}
+
+        sampleset = dwave.embedding.unembed_sampleset(self.target_sampleset,
+                                                      pruned_embedding,
+                                                      self.bqm,
+                                                      **unembed_kwargs)
+
+        return sampleset
