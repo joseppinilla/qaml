@@ -217,10 +217,12 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
             else:
                 S = self.bqm.quadratic
                 embedding = minorminer.find_embedding(S,self.networkx_graph)
+            if not embedding:
+                warnings.warn("Embedding not found")
         if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
-            self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,embedding)
-        else:
-            self.embedding = embedding
+            edgelist = self.networkx_graph.edges
+            embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
+        self.embedding = embedding
         self.scalar = 1.0
 
     def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
@@ -381,18 +383,19 @@ class AdachiQASampler(QASampler):
 
         for (u, v), bias in bqm.quadratic.items():
             if u in self.disjoint_chains:
-                interactions =  []
-                for i in range(self.disjoint_chains[u]):
-                    u_sub = f'{u}_ADACHI_SUBCHAIN_{i}'
-                    interactions+=list(self.embedding.interaction_edges(u_sub,v))
-            elif v in self.disjoint_chains:
-                interactions =  []
-                for i in range(self.disjoint_chains[v]):
-                    v_sub = f'{v}_ADACHI_SUBCHAIN_{i}'
-                    interactions+=list(self.embedding.interaction_edges(u,v_sub))
+                iter_u = [f'{u}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[u])]
             else:
-                interactions = list(self.embedding.interaction_edges(u,v))
+                iter_u = [u]
+            if v in self.disjoint_chains:
+                iter_v = [f'{v}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[v])]
+            else:
+                iter_v = [v]
 
+            interactions = []
+            for i_u in iter_u:
+                for i_v in iter_v:
+                    interactions+=list(self.embedding.interaction_edges(i_u,i_v))
+            
             if interactions:
                 b = bias / len(interactions)
                 target_bqm.add_interactions_from((u,v,b) for u,v in interactions)
