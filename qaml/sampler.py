@@ -225,6 +225,10 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         self.embedding = embedding
         self.scalar = 1.0
 
+    def to_networkx_graph(self):
+        self._networkx_graph = dwave.system.DWaveSampler.to_networkx_graph(self)
+        return self._networkx_graph
+
     def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
         embedding = self.embedding
         bqm = self.to_binary_quadratic_model()
@@ -395,7 +399,7 @@ class AdachiQASampler(QASampler):
             for i_u in iter_u:
                 for i_v in iter_v:
                     interactions+=list(self.embedding.interaction_edges(i_u,i_v))
-            
+
             if interactions:
                 b = bias / len(interactions)
                 target_bqm.add_interactions_from((u,v,b) for u,v in interactions)
