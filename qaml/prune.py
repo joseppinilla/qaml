@@ -32,13 +32,13 @@ class AdaptiveUnstructured(BasePruningMethod):
             embedding = self.sampler.embedding_orig
         except:
             embedding = self.sampler.embedding
-        solver_graph = self.sampler.networkx_graph
+        solver_graph = self.sampler.to_networkx_graph()
         # Account for missing interactions between chains by using mask
         for v in range(V):
             for h in range(V,V+H):
-                for interaction in embedding.interaction_edges(v,h):
-                    if not solver_graph.has_edge(*interaction):
-                        mask[h-V][v] = 0
+                interactions = embedding.interaction_edges(v,h)
+                if not any(solver_graph.has_edge(q,t) for q,t in interactions):
+                    mask[h-V][v] = 0
         return mask
 
     @classmethod
