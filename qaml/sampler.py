@@ -110,17 +110,22 @@ class BinaryQuadraticModelSampler(NetworkSampler):
     def to_binary_quadratic_model(self):
         bias_v = self.model.b.data.numpy()
         bias_h = self.model.c.data.numpy()
-        W = self.model.W.data.numpy()
+        W = self.model.W.data
         V = self.model.V
         # Linear biases
         lin_V = {i: -b.item() for i,b in enumerate(bias_v)}
         lin_H = {j: -c.item() for j,c in enumerate(bias_h)}
         linear = {**lin_V,**{V+j: c for j,c in lin_H.items()}}
+
+        # To prune BQM from mask
+        mask = self.model.state_dict().get('W_mask',torch.ones_like(W))
+
         # Quadratic weights
         quadratic = {}
         for i in lin_V:
             for j in lin_H:
-                quadratic[(i,V+j)] = -W[j][i].item()
+                if mask[j][i]:
+                    quadratic[(i,V+j)] = -W[j][i].item()
         # Using "BINARY" formulation to preserve model
         self._bqm = dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
         return self._bqm
