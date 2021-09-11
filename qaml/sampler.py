@@ -214,7 +214,7 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
                                      BinaryQuadraticModelSampler):
     sample_kwargs = {"answer_mode":'raw',
                      "num_spin_reversal_transforms":0,
-                     "anneal_schedule":[(0.0,0.0),(0.5,0.5),(10.5,0.5),(11.0,1.0)],
+                     "anneal_schedule":[(0.0,0.0),(0.6,0.6),(10.6,0.6),(11.0,1.0)],
                      "auto_scale":False}
 
     embed_kwargs = {"chain_strength":1.6}
@@ -254,18 +254,18 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         embedding = self.embedding
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
+        target_bqm = self.embedding.embed_bqm(bqm,**embed_kwargs)
         if auto_scale:
             # Same as target auto_scale but retains scalar
-            target_bqm = self.embedding.embed_bqm(bqm,**embed_kwargs)
             ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
             norm_args = {'bias_range':self.properties['h_range'],
                          'quadratic_range':self.properties['j_range'],
                          'ignored_interactions':ignoring}
             self.scalar = target_bqm.normalize(**norm_args)
-            return target_bqm
         else:
-            bqm.scale(1.0/float(self.beta))
-            return self.embedding.embed_bqm(bqm,**embed_kwargs)
+            target_bqm.scale(1.0/float(self.beta))
+
+        return target_bqm
 
     def sample(self, **kwargs):
         sample_kwargs = {**self.sample_kwargs,**kwargs}
@@ -277,8 +277,7 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         unembed_kwargs = {**self.unembed_kwargs,**kwargs}
 
         sampleset = dwave.embedding.unembed_sampleset(self.target_sampleset,
-                                                      self.embedding,
-                                                      self.qubo,
+                                                      self.embedding,self.qubo,
                                                       **unembed_kwargs)
         return sampleset
 
@@ -332,11 +331,14 @@ class AdachiQASampler(QASampler):
         if topology_type == 'pegasus':
             self.template_graph = dnx.pegasus_graph(shape[0])
             if embedding is None:
-                helper = minorminer.utils.pegasus._pegasus_fragment_helper
-                _embedder, _converter = helper(16, self.template_graph)
-                _left,_right = _embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
-                left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
-                embedding = {**left,**{k+model.V:v for k,v in right.items()}}
+                # TODO: Use option with chain_imbalance=None
+                # helper = minorminer.utils.pegasus._pegasus_fragment_helper
+                # _embedder, _converter = helper(16, self.template_graph)
+                # _left,_right = _embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                # left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
+                # embedding = {**left,**{k+model.V:v for k,v in right.items()}}
+                cache = minorminer.busclique.busgraph_cache(self.template_graph)
+                embedding = cache.find_biclique_embedding(model.V,model.H)
         elif topology_type == 'chimera':
             self.template_graph = dnx.chimera_graph(*shape)
             if embedding is None:
@@ -373,46 +375,36 @@ class AdachiQASampler(QASampler):
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
     def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
+        bqm = self.to_ising()
         embedding = self.embedding
-        bqm = self.to_binary_quadratic_model().copy()
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
-        if auto_scale:
-            # Same as target auto_scale but retains scalar
-            norm_args = {'bias_range':self.properties['h_range'],
-                         'quadratic_range':self.properties['j_range']}
-            self.scalar = bqm.normalize(**norm_args)
-        else:
-            bqm.scale(1.0/float(self.beta))
-
+        offset = 0
         # Create new BQM including new subchains
         chain_strength = embed_kwargs['chain_strength']
-        target_bqm = dimod.BinaryQuadraticModel.empty('BINARY')
+        target_bqm = dimod.BinaryQuadraticModel.empty('SPIN')
         for v, bias in bqm.linear.items():
-            if v in self.embedding:
-                chain = self.embedding[v]
+            if v in embedding:
+                chain = embedding[v]
                 b = bias / len(chain)
                 target_bqm.add_variables_from({u: b for u in chain})
-                # Values are adjusted as 'BINARY' type
-                for p, q in self.embedding.chain_edges(v):
-                    target_bqm.add_interaction(p, q, -4*chain_strength)
-                    target_bqm.add_variable(p, 2*chain_strength)
-                    target_bqm.add_variable(q, 2*chain_strength)
+                for p, q in embedding.chain_edges(v):
+                    target_bqm.add_interaction(p, q, -chain_strength)
+                    offset += chain_strength
             elif v in self.disjoint_chains:
                 disjoint_chain = []
                 for i in range(self.disjoint_chains[v]):
                     v_sub = f'{v}_ADACHI_SUBCHAIN_{i}'
-                    disjoint_chain += [q for q in self.embedding[v_sub]]
-                    for p, q in self.embedding.chain_edges(v_sub):
-                        target_bqm.add_interaction(p, q, -4*chain_strength)
-                        target_bqm.add_variable(p, 2*chain_strength)
-                        target_bqm.add_variable(q, 2*chain_strength)
+                    disjoint_chain += [q for q in embedding[v_sub]]
+                    for p, q in embedding.chain_edges(v_sub):
+                        target_bqm.add_interaction(p, q, -chain_strength)
+                        offset += chain_strength
                 b = bias / len(disjoint_chain)
                 target_bqm.add_variables_from({u: b for u in disjoint_chain})
             else:
                 raise MissingChainError(v)
 
-        target_bqm.add_offset(bqm.offset)
+        target_bqm.add_offset(offset)
 
         for (u, v), bias in bqm.quadratic.items():
             if u in self.disjoint_chains:
@@ -427,11 +419,21 @@ class AdachiQASampler(QASampler):
             interactions = []
             for i_u in iter_u:
                 for i_v in iter_v:
-                    interactions+=list(self.embedding.interaction_edges(i_u,i_v))
+                    interactions+=list(embedding.interaction_edges(i_u,i_v))
 
             if interactions:
                 b = bias / len(interactions)
                 target_bqm.add_interactions_from((u,v,b) for u,v in interactions)
+
+        if auto_scale:
+            # Same as target auto_scale but retains scalar
+            ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
+            norm_args = {'bias_range':self.properties['h_range'],
+                         'quadratic_range':self.properties['j_range'],
+                         'ignored_interactions':ignoring}
+            self.scalar = target_bqm.normalize(**norm_args)
+        else:
+            target_bqm.scale(1.0/float(self.beta))
 
         return target_bqm
 
@@ -443,7 +445,7 @@ class AdachiQASampler(QASampler):
 
         sampleset = dwave.embedding.unembed_sampleset(self.target_sampleset,
                                                       pruned_embedding,
-                                                      self.bqm,
+                                                      self.qubo,
                                                       **unembed_kwargs)
 
         return sampleset
@@ -466,11 +468,14 @@ class AdaptiveQASampler(QASampler):
         if topology_type == 'pegasus':
             self.template_graph = dnx.pegasus_graph(shape[0])
             if embedding is None:
-                helper = minorminer.utils.pegasus._pegasus_fragment_helper
-                _embedder, _converter = helper(16, self.template_graph)
-                _left,_right = _embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
-                left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
-                embedding = {**left,**{k+model.V:v for k,v in right.items()}}
+                # TODO: Use option with chain_imbalance=None
+                # helper = minorminer.utils.pegasus._pegasus_fragment_helper
+                # _embedder, _converter = helper(16, self.template_graph)
+                # _left,_right = _embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                # left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
+                # embedding = {**left,**{k+model.V:v for k,v in right.items()}}
+                cache = minorminer.busclique.busgraph_cache(self.template_graph)
+                embedding = cache.find_biclique_embedding(model.V,model.H)
         elif topology_type == 'chimera':
             self.template_graph = dnx.chimera_graph(*shape)
             if embedding is None:
@@ -503,28 +508,3 @@ class AdaptiveQASampler(QASampler):
                 raise RuntimeError(f"No subgraphs were found for chain: {x}")
 
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
-
-    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
-        embedding = self.embedding
-        bqm = self.to_binary_quadratic_model()
-        embed_kwargs = {**self.embed_kwargs,**kwargs}
-
-        if auto_scale:
-            # Same as target auto_scale but retains scalar
-            norm_args = {'bias_range':self.properties['h_range'],
-                         'quadratic_range':self.properties['j_range']}
-            self.scalar = bqm.normalize(**norm_args)
-        else:
-            bqm.scale(1.0/float(self.beta))
-
-        return self.embedding.embed_bqm(bqm,**embed_kwargs)
-
-    def unembed_sampleset(self, **kwargs):
-        unembed_kwargs = {**self.unembed_kwargs,**kwargs}
-
-        sampleset = dwave.embedding.unembed_sampleset(self.target_sampleset,
-                                                      self.embedding,
-                                                      self.bqm,
-                                                      **unembed_kwargs)
-
-        return sampleset

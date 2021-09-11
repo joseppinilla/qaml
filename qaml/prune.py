@@ -1,12 +1,7 @@
-import qaml
+import dwave
 import torch
-import dimod
-import minorminer
-import dwave_networkx as dnx
 
-import matplotlib.pyplot as plt
 from torch.nn.utils.prune import BasePruningMethod
-from dwave.embedding import EmbeddedStructure
 
 class AdaptiveUnstructured(BasePruningMethod):
     r""" Prune (currently unpruned) units in a tensor by adapting to existing
@@ -43,8 +38,65 @@ class AdaptiveUnstructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, sampler):
-        return super(AdaptiveUnstructured, cls).apply(module,name,sampler)
+        return super(AdaptiveUnstructured,cls).apply(module,name,sampler)
 
-def adaptive_unstructured(module,name,sampler):
+def adaptive_unstructured(module, name, sampler):
     AdaptiveUnstructured.apply(module,name,sampler)
+    return module
+
+
+class PriorityEmbeddingUnstructured(BasePruningMethod):
+    PRUNING_TYPE = "unstructured"
+
+    def __init__(self, sampler, priority):
+        self.sampler = sampler
+        self.priority = priority
+
+    def compute_mask(self, t, default_mask):
+        mask = default_mask.clone(memory_format=torch.contiguous_format)
+
+        # Does not support embedding_orig, only works for AdaptiveQASampler
+        priority = self.priority
+        embedding = self.sampler.embedding
+        V,H = self.sampler.model.V, self.sampler.model.H
+        solver_graph = self.sampler.to_networkx_graph()
+
+        # Account for missing interactions between chains by using mask
+        temp_mask = mask.clone()
+        for v in range(V):
+            for h in range(V,V+H):
+                interactions = embedding.interaction_edges(v,h)
+                if not any(solver_graph.has_edge(q,t) for q,t in interactions):
+                    temp_mask[h-V][v] = 0
+        # Degree of each chain
+        degree = {v:d.item() for v,d in zip(range(V),temp_mask.sum(0))}
+        # Modify embedding of viible nodes to account for priority qubits
+        temp_embedding = dict(embedding)
+        v_sort = [v for _,v in sorted(zip(degree.values(),range(V)),reverse=True)]
+        for p,v in zip(priority,v_sort):
+            if degree[p] < degree[v]:
+                v_chain = temp_embedding[v]
+                p_chain = temp_embedding[p]
+                temp_embedding[v] = p_chain
+                temp_embedding[p] = v_chain
+
+        edgelist = self.sampler.networkx_graph.edges
+        embedding = dwave.embedding.EmbeddedStructure(edgelist,temp_embedding)
+
+        # Account for missing interactions between chains by using mask
+        for v in range(V):
+            for h in range(V,V+H):
+                interactions = embedding.interaction_edges(v,h)
+                if not any(solver_graph.has_edge(q,t) for q,t in interactions):
+                    mask[h-V][v] = 0
+
+        self.sampler.embedding = embedding
+        return mask
+
+    @classmethod
+    def apply(cls, module, name, sampler, priority):
+        return super(PriorityEmbeddingUnstructured,cls).apply(module,name,sampler,priority)
+
+def priority_embedding_unstructured(module, name, sampler, priority):
+    PriorityEmbeddingUnstructured.apply(module,name,sampler,priority)
     return module
