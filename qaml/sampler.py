@@ -508,3 +508,81 @@ class AdaptiveQASampler(QASampler):
                 raise RuntimeError(f"No subgraphs were found for chain: {x}")
 
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
+
+class RepurposeQASampler(QASampler):
+
+    disjoint_chains : dict
+
+    embedding = None
+
+    target_bqm = None
+    target_sampleset = None
+
+    def __init__(self, model, embedding=None, beta=1.0,
+                 failover=False, retry_interval=-1, **config):
+        QASampler.__init__(self,model,{},beta,failover,retry_interval,**config)
+
+        topology_type = self.properties['topology']['type']
+        shape = self.properties['topology']['shape']
+        if topology_type == 'pegasus':
+            self.template_graph = dnx.pegasus_graph(shape[0])
+            if embedding is None:
+                # TODO: Use option with chain_imbalance=None
+                # helper = minorminer.utils.pegasus._pegasus_fragment_helper
+                # _embedder, _converter = helper(16, self.template_graph)
+                # _left,_right = _embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                # left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
+                # embedding = {**left,**{k+model.V:v for k,v in right.items()}}
+                cache = minorminer.busclique.busgraph_cache(self.template_graph)
+                embedding = cache.find_biclique_embedding(model.V,model.H)
+        elif topology_type == 'chimera':
+            self.template_graph = dnx.chimera_graph(*shape)
+            if embedding is None:
+                self.template_graph = dnx.chimera_graph(*shape)
+                embedder = processor(self.template_graph.edges(),M=16,N=16,L=4)
+                left,right = embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
+                embedding = {v:chain for v,chain in enumerate(left+right)}
+        else:
+            raise RuntimeError("Sampler `topology_type` not compatible.")
+        # Embedded structures have some useful methods
+        embedding = dwave.embedding.EmbeddedStructure(self.template_graph.edges,embedding)
+
+        # Find all subchains and create new hidden units where possible
+        model_size = model.V+model.H
+        new_embedding = {}
+        for x in embedding:
+            emb_x = embedding[x]
+            chain_edges = embedding._chain_edges[x]
+            # Very inneficient but does the job of creating chain subgraphs
+            chain_graph = nx.Graph()
+            chain_graph.add_nodes_from([v for v in emb_x if self.networkx_graph.has_node(v)])
+            chain_graph.add_edges_from([(emb_x[i],emb_x[j]) for i,j in chain_edges if self.networkx_graph.has_edge(emb_x[i],emb_x[j])])
+            chain_subgraphs = [(len(c),chain_graph.subgraph(c)) for c in nx.connected_components(chain_graph)]
+
+            if len(chain_subgraphs)>1:
+                # Visible nodes
+                if x<model.V:
+                    l,subgraph = max(chain_subgraphs,key=lambda l_chain: l_chain[0])
+                    new_embedding[x] = list(subgraph.nodes)
+                # Hidden nodes
+                else:
+                    length,subgraph = chain_subgraphs[0]
+                    new_embedding[x] = subgraph.nodes
+                    for length,subgraph in chain_subgraphs[1:]:
+                        new_x = model_size
+                        new_embedding[new_x] = list(subgraph.nodes)
+                        model_size+=1
+
+            elif len(chain_subgraphs)==1:
+                new_embedding[x] = list(chain_graph.nodes)
+            else:
+                raise RuntimeError(f"No subgraphs were found for chain: {x}")
+
+        # Modify model to include new hidden nodes
+        new_H = model.V-model_size
+        if new_H>model.H:
+            rbm.H = new_H
+            rbm.c.data = torch.zeros(model.H)
+            rbm.W.data = torch.randn(new_H,model.V)
+
+        self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
