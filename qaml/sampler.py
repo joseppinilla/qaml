@@ -579,10 +579,10 @@ class RepurposeQASampler(QASampler):
                 raise RuntimeError(f"No subgraphs were found for chain: {x}")
 
         # Modify model to include new hidden nodes
-        new_H = model.V-model_size
+        new_H = model_size-model.V
         if new_H>model.H:
-            rbm.H = new_H
-            rbm.c.data = torch.zeros(model.H)
-            rbm.W.data = torch.randn(new_H,model.V)
+            model.H = new_H
+            model.c.data = torch.zeros(model.H)
+            model.W.data = torch.randn(new_H,model.V)
 
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
