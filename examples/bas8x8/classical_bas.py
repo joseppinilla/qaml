@@ -17,9 +17,9 @@ import torchvision.transforms as torch_transforms
 M,N = SHAPE = (8,8)
 DATA_SIZE = N*M
 HIDDEN_SIZE = 64
-EPOCHS = 20
-SAMPLES = 4000
-BATCH_SIZE = 2000
+EPOCHS = 200
+SAMPLES = None
+BATCH_SIZE = 400
 TRAIN,TEST = SPLIT = 400,110
 # Stochastic Gradient Descent
 learning_rate = 0.1
@@ -30,7 +30,7 @@ momentum = 0.5
 #################################### Input Data ################################
 bas_dataset = qaml.datasets.BAS(*SHAPE,embed_label=True,transform=torch.Tensor)
 train_dataset,test_dataset = torch.utils.data.random_split(bas_dataset,[*SPLIT])
-train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=True,
+train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False,
                                                num_samples=SAMPLES)
 train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
@@ -56,8 +56,10 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
-gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
+gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=2.5)
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
+
+# torch.nn.utils.prune.custom_from_mask(rbm,'W',mask)
 
 # %%
 ################################## Model Training ##############################
@@ -74,9 +76,9 @@ for t in range(EPOCHS):
         input_data = img_batch.flatten(1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data)
+        v0, prob_h0 = input_data, rbm(input_data,scale=2.5)
         # Negative Phase
-        vk, prob_hk = gibbs_sampler(v0.detach(), k=5)
+        vk, prob_hk = gibbs_sampler(v0.detach(), k=50)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -114,6 +116,24 @@ for t in range(EPOCHS):
 # rbm.eval()
 
 # %%
+############################## Logging Directory ###############################
+import os
+directory = 'BAS88_classical5_200_Adapt'
+if not os.path.exists(directory):
+        os.makedirs(directory)
+seed = torch.initial_seed()
+if not os.path.exists(f'{directory}/{seed}'):
+        os.makedirs(f'{directory}/{seed}')
+
+# %%
+############################ Store Model and Logs ##############################
+torch.save(b_log,f"./{directory}/{seed}/b.pt")
+torch.save(c_log,f"./{directory}/{seed}/c.pt")
+torch.save(W_log,f"./{directory}/{seed}/W.pt")
+torch.save(err_log,f"./{directory}/{seed}/err.pt")
+torch.save(accuracy_log,f"./{directory}/{seed}/accuracy.pt")
+
+# %%
 ################################## Sampling ####################################
 num_samples = 1000
 prob_v,_ = gibbs_sampler(torch.rand(num_samples,DATA_SIZE),k=10)
@@ -134,7 +154,7 @@ hist = {}
 count = 0
 mask = torch_transforms.functional.erase(torch.ones(1,M,N),2,2,4,4,0).flatten()
 for img, label in train_dataset:
-    clamped = mask*(img.flatten(1).detach().clone())
+    clamped = mask*(img.flatten().detach().clone())
     prob_hk = rbm.forward(clamped + (1-mask)*0.5)
     prob_vk = rbm.generate(prob_hk).detach()
     for _ in range(k):

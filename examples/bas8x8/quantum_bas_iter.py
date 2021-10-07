@@ -26,17 +26,27 @@ train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False,
 train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
 
+beta_init = 4.0
+auto_scale = False
+num_reads = 1000
+weight_init = 1.0
+sampler_type = 'Adachi' #'Adv' 'Adachi' 'Adapt' 'Prio' 'Rep'
+directory = f"BAS88_beta{beta_init}_{weight_init}"
+directory += f"{'' if auto_scale else 'no'}scale_{EPOCHS}_{'batch' if num_reads==BATCH_SIZE else num_reads}"
+directory += f"{sampler_type}_wd{weight_decay}"
+directory = directory.replace('.','')
+print(directory)
 for SEED in [0]:
     ######################################## RNG ###################################
     torch.manual_seed(SEED)
+    ############################## Logging Directory ###############################
+    if not os.path.exists(directory):
+            os.makedirs(directory)
+    if not os.path.exists(f'{directory}/{SEED}'):
+            os.makedirs(f'{directory}/{SEED}')
     ################################# Model Definition #############################
     # Specify model with dimensions
     rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE)
-
-    # Initialize biases
-    torch.nn.init.constant_(rbm.b,-0.5)
-    torch.nn.init.zeros_(rbm.c)
-    torch.nn.init.uniform_(rbm.W,-0.5,0.5)
 
     # Set up optimizers
     optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
@@ -44,20 +54,41 @@ for SEED in [0]:
 
     # Set up training mechanisms
     # Trainable inverse temperature with separate optimizer
-    beta = torch.nn.Parameter(torch.tensor(4.0), requires_grad=True)
+    beta = torch.nn.Parameter(torch.tensor(beta_init), requires_grad=True)
     beta_optimizer = torch.optim.SGD([beta],lr=0.001)
     solver_name = "Advantage_system1.1"
-    # qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
-    # qa_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
-    # qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
-    qa_sampler = qaml.sampler.RepurposeQASampler(rbm,solver=solver_name,beta=beta)
-    qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
-    # qaml.prune.priority_embedding_unstructured(rbm,'W',qa_sampler,priority=[rbm.V-1,rbm.V-8-1])
-    print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+
+    if sampler_type == 'Adv':
+        qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+    elif sampler_type == 'Adachi':
+        qa_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
+        qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
+        print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+        torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{SEED}/mask.pt")
+    elif sampler_type == 'Adapt':
+        qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
+        qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
+        print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+        torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{SEED}/mask.pt")
+    elif sampler_type == 'Prio':
+        qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
+        qaml.prune.priority_embedding_unstructured(rbm,'W',qa_sampler,priority=[rbm.V-1,rbm.V-8-1])
+        print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+        torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{SEED}/mask.pt")
+    elif sampler_type == 'Rep':
+        qa_sampler = qaml.sampler.RepurposeQASampler(rbm,solver=solver_name,beta=beta)
+        qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
+        print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+        torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{SEED}/mask.pt")
 
     # Loss and autograd
     CD = qaml.autograd.SampleBasedConstrastiveDivergence()
     betaGrad = qaml.autograd.AdaptiveBeta()
+
+    # Initialize biases
+    torch.nn.init.constant_(rbm.b,-0.5*beta_init)
+    torch.nn.init.zeros_(rbm.c)
+    torch.nn.init.uniform_(rbm.W,-weight_init,weight_init)
 
     ################################## Model Training ##############################
     # Set the model to training mode
@@ -78,9 +109,10 @@ for SEED in [0]:
             input_data = img_batch.flatten(1)
 
             # Negative Phase
-            vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
+            vk, prob_hk = qa_sampler(num_reads=num_reads,auto_scale=auto_scale)
             # Positive Phase
-            v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.scalar*qa_sampler.beta)
+            scale = qa_sampler.scalar*qa_sampler.beta if auto_scale else 1.0
+            v0, prob_h0 = input_data, rbm(input_data,scale=scale)
 
             # Reconstruction error from Contrastive Divergence
             err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -121,35 +153,25 @@ for SEED in [0]:
         mask = torch.ones(1,M,N)
         for test_data, test_label in test_dataset:
             test_data[-2:,-1] = 0.5
-            prob_hk = rbm(test_data.flatten(),scale=qa_sampler.scalar*qa_sampler.beta)
-            label_pred = rbm.generate(prob_hk,scale=qa_sampler.scalar*qa_sampler.beta).view(*SHAPE)[-2:,-1]
+            prob_hk = rbm(test_data.flatten(),scale=scale)
+            label_pred = rbm.generate(prob_hk,scale=scale).view(*SHAPE)[-2:,-1]
             if label_pred.argmax() == test_label.argmax():
                 count+=1
         accuracy_log.append(count/TEST)
         print(f"Testing accuracy: {count}/{TEST} ({count/TEST:.2f})")
 
-    ############################## Logging Directory ###############################
-    directory = 'BAS88_beta40_scale_200_Adv_Rep_wd001'
-    if not os.path.exists(directory):
-            os.makedirs(directory)
-    seed = torch.initial_seed()
-    if not os.path.exists(f'{directory}/{seed}'):
-            os.makedirs(f'{directory}/{seed}')
-
     ############################ Store Model and Logs ##############################
-    torch.save(b_log,f"./{directory}/{seed}/b.pt")
-    torch.save(c_log,f"./{directory}/{seed}/c.pt")
-    torch.save(W_log,f"./{directory}/{seed}/W.pt")
-    torch.save(err_log,f"./{directory}/{seed}/err.pt")
-    torch.save(beta_log,f"./{directory}/{seed}/beta.pt")
-    torch.save(scalar_log,f"./{directory}/{seed}/scalar.pt")
-    torch.save(accuracy_log,f"./{directory}/{seed}/accuracy.pt")
-    torch.save(err_beta_log,f"./{directory}/{seed}/err_beta_log.pt")
-    torch.save(dict(qa_sampler.embedding),f"./{directory}/{seed}/embedding.pt")
-    torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{seed}/mask.pt")
-    # torch.save(dict(qa_sampler.embedding_orig),f"./{directory}/{seed}/embedding_orig.pt")
-rbm.V
-rbm.H
+    torch.save(b_log,f"./{directory}/{SEED}/b.pt")
+    torch.save(c_log,f"./{directory}/{SEED}/c.pt")
+    torch.save(W_log,f"./{directory}/{SEED}/W.pt")
+    torch.save(err_log,f"./{directory}/{SEED}/err.pt")
+    torch.save(beta_log,f"./{directory}/{SEED}/beta.pt")
+    torch.save(scalar_log,f"./{directory}/{SEED}/scalar.pt")
+    torch.save(accuracy_log,f"./{directory}/{SEED}/accuracy.pt")
+    torch.save(err_beta_log,f"./{directory}/{SEED}/err_beta_log.pt")
+    torch.save(dict(qa_sampler.embedding),f"./{directory}/{SEED}/embedding.pt")
+    # torch.save(dict(qa_sampler.embedding_orig),f"./{directory}/{SEED}/embedding_orig.pt")
+
 # Scaling factor graph
 fig, ax = plt.subplots()
 plt.plot(scalar_log)

@@ -17,7 +17,7 @@ import torchvision.transforms as torch_transforms
 M,N = SHAPE = (8,8)
 DATA_SIZE = N*M
 HIDDEN_SIZE = 64
-EPOCHS = 150
+EPOCHS = 200
 SAMPLES = None
 BATCH_SIZE = 400
 TRAIN,TEST = SPLIT = 400,110
@@ -60,7 +60,12 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
 beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
 beta_optimizer = torch.optim.SGD([beta],lr=0.01)
 solver_name = "Advantage_system1.1"
-qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+# qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+qa_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
+# qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
+qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
+# qaml.prune.priority_embedding_unstructured(rbm,'W',qa_sampler,priority=[rbm.V-1,rbm.V-8-1])
+print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
 
 # Loss and autograd
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
@@ -72,12 +77,13 @@ betaGrad = qaml.autograd.AdaptiveBeta()
 rbm.train()
 err_log = []
 beta_log = []
+scalar_log = []
 err_beta_log = []
 accuracy_log = []
 b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
-for t in range(100):
+for t in range(EPOCHS):
     epoch_error = 0
     epoch_error_beta = 0
 
@@ -85,9 +91,9 @@ for t in range(100):
         input_data = img_batch.flatten(1)
 
         # Negative Phase
-        vk, prob_hk = qa_sampler(500,auto_scale=True)
+        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.beta*qa_sampler.scalar)
+        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.scalar*qa_sampler.beta)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -107,7 +113,7 @@ for t in range(100):
         err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta)
         beta_optimizer.zero_grad()
         err_beta.backward()
-        beta_optimizer.step()
+        # beta_optimizer.step()
         beta.data = torch.clamp(beta,min=1.0)
         epoch_error_beta  += err_beta.item()
 
@@ -117,6 +123,7 @@ for t in range(100):
     W_log.append(rbm.W.detach().clone().numpy().flatten())
     err_log.append(epoch_error)
     beta_log.append(beta.item())
+    scalar_log.append(qa_sampler.scalar)
     err_beta_log.append(epoch_error_beta)
     print(f"Epoch {t} Reconstruction Error = {epoch_error}")
     print(f"Beta = {qa_sampler.beta}")
@@ -134,35 +141,39 @@ for t in range(100):
     accuracy_log.append(count/TEST)
     print(f"Testing accuracy: {count}/{TEST} ({count/TEST:.2f})")
 
-
 # Set the model to evaluation mode
 # rbm.eval()
 
 # %%
 ############################## Logging Directory ###############################
 import os
-directory = 'BAS88_adabeta_scale_200_seed0_Adv'
+directory = 'BAS88_adabeta_scale_200_Adv_Adachi'
 if not os.path.exists(directory):
         os.makedirs(directory)
+seed = torch.initial_seed()
+if not os.path.exists(f'{directory}/{seed}'):
+        os.makedirs(f'{directory}/{seed}')
 
-
-# %% md
+# %%
 ############################ Store Model and Logs ##############################
-torch.save(b_log,f"./{directory}/quantum_b.pt")
-torch.save(c_log,f"./{directory}/quantum_c.pt")
-torch.save(W_log,f"./{directory}/quantum_W.pt")
-torch.save(err_log,f"./{directory}/quantum_err.pt")
-torch.save(accuracy_log,f"./{directory}/quantum_accuracy.pt")
-torch.save(dict(qa_sampler.embedding),f"./{directory}/embedding.pt")
-torch.save(dict(qa_sampler.embedding_orig),f"./{directory}/embedding_orig.pt")
+torch.save(b_log,f"./{directory}/{seed}/b.pt")
+torch.save(c_log,f"./{directory}/{seed}/c.pt")
+torch.save(W_log,f"./{directory}/{seed}/W.pt")
+torch.save(err_log,f"./{directory}/{seed}/err.pt")
+torch.save(beta_log,f"./{directory}/{seed}/beta.pt")
+torch.save(accuracy_log,f"./{directory}/{seed}/accuracy.pt")
+torch.save(err_beta_log,f"./{directory}/{seed}/err_beta_log.pt")
+torch.save(dict(qa_sampler.embedding),f"./{directory}/{seed}/embedding.pt")
+torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{seed}/mask.pt")
+torch.save(dict(qa_sampler.embedding_orig),f"./{directory}/{seed}/embedding_orig.pt")
 
 # %% md
 ############################ Load Model and Logs ###############################
-b_log = torch.load(f"./{directory}/quantum_b.pt")
-c_log = torch.load(f"./{directory}/quantum_c.pt")
-W_log = torch.load(f"./{directory}/quantum_W.pt")
-err_log = torch.load(f"./{directory}/quantum_err.pt")
-accuracy_log = torch.load(f"./{directory}/quantum_accuracy.pt")
+b_log = torch.load(f"./{directory}/b.pt")
+c_log = torch.load(f"./{directory}/c.pt")
+W_log = torch.load(f"./{directory}/W.pt")
+err_log = torch.load(f"./{directory}/err.pt")
+accuracy_log = torch.load(f"./{directory}/accuracy.pt")
 embedding = torch.load(f"./{directory}/embedding.pt")
 embedding_orig = torch.load(f"./{directory}/embedding_orig.pt")
 
@@ -174,7 +185,7 @@ qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,
 
 # %%
 ################################# qBAS Score ###################################
-scale = qa_sampler.scalar
+scale = qa_sampler.scalar*qa_sampler.beta
 num_samples = 1000
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=scale)
 prob_v,_ = gibbs_sampler(torch.rand(num_samples,DATA_SIZE),k=200)
@@ -193,7 +204,7 @@ print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 k = 5
 hist = {}
 count = 0
-scale = 24
+scale = qa_sampler.scalar*qa_sampler.beta
 mask = torch_transforms.functional.erase(torch.ones(1,M,N),2,2,4,4,0).flatten()
 for img, label in bas_dataset:
     clamped = mask*(img.flatten().detach().clone())
@@ -215,17 +226,26 @@ plt.xlabel('Incorrect Bits')
 # %%
 ############################ MODEL VISUALIZATION ###############################
 
+# Scalar graph
+fig, ax = plt.subplots()
+plt.plot(scalar_log)
+plt.ylabel("Scaling factor")
+plt.xlabel("Epoch")
+plt.savefig("quantum_scalar.pdf")
+
 # Beta error graph
 fig, ax = plt.subplots()
 plt.plot(beta_log)
 plt.ylabel("Beta")
 plt.xlabel("Epoch")
+plt.savefig("quantum_beta.pdf")
 
 # Beta error graph
 fig, ax = plt.subplots()
 plt.plot(err_beta_log)
 plt.ylabel("Beta Error")
 plt.xlabel("Epoch")
+plt.savefig("quantum_beta_err.pdf")
 
 # Testing accuracy graph
 fig, ax = plt.subplots()
@@ -288,7 +308,7 @@ for img,label in bas_dataset:
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
 qa_energies = []
-qa_sampleset = qa_sampler(num_reads=100,auto_scale=True)
+qa_sampleset = qa_sampler(num_reads=BATCH_SIZE,auto_scale=True)
 for s_v,s_h in zip(*qa_sampleset):
     qa_energies.append(rbm.free_energy(s_v.detach()).item())
 

@@ -8,14 +8,14 @@ import torchvision.transforms as torch_transforms
 ################################# Hyperparameters ##############################
 M,N = SHAPE = (8,8)
 DATA_SIZE = N*M
-HIDDEN_SIZE = 71
+HIDDEN_SIZE = 64
 EPOCHS = 200
 SAMPLES = None
 BATCH_SIZE = 400
 TRAIN,TEST = SPLIT = 400,110
 # Stochastic Gradient Descent
 learning_rate = 0.1
-weight_decay = 1e-4
+weight_decay = 0.001
 momentum = 0.5
 
 #################################### Input Data ################################
@@ -25,8 +25,9 @@ train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False,
                                                num_samples=SAMPLES)
 train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
-beta=4.0
-for SEED in [2,7,8,42]:
+beta=1.0
+directory = 'BAS88_01classical5_beta10_200_Adachi_wd0001'
+for SEED in [0,2,7,8,42]:
     ######################################## RNG ###################################
     torch.manual_seed(SEED)
     ################################# Model Definition #############################
@@ -36,7 +37,7 @@ for SEED in [2,7,8,42]:
     # Initialize biases
     torch.nn.init.constant_(rbm.b,0.5)
     torch.nn.init.zeros_(rbm.c)
-    torch.nn.init.uniform_(rbm.W,-0.5,0.5)
+    torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 
     # Set up optimizer
     optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
@@ -46,10 +47,11 @@ for SEED in [2,7,8,42]:
     gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=beta)
     CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 
-    # mask = torch.load("BAS88_beta25_scale_200_Adv_Adachi/0/mask.pt")
-    mask = torch.load("BAS88_beta40_scale_200_Adv_Rep_wd001/0/mask.pt")
-    torch.nn.utils.prune.custom_from_mask(rbm,'W',mask)
-    print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+    mask = torch.load("BAS88_beta25_05noscale_200_batchAdachi_wd001/0/mask.pt")
+    # mask = torch.load("BAS88_beta40_scale_200_Adv_Rep_wd001/0/mask.pt")
+    # mask = torch.load("BAS88_beta40_scale_200_Adv_Rep_wd001/0/mask.pt")
+    # torch.nn.utils.prune.custom_from_mask(rbm,'W',mask)
+    # print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
 
     ################################## Model Training ##############################
     # Set the model to training mode
@@ -103,7 +105,6 @@ for SEED in [2,7,8,42]:
         print(f"Testing accuracy: {count}/{TEST} ({count/TEST:.2f})")
 
     ############################## Logging Directory ###############################
-    directory = 'BAS88_classical5_beta40_200_Rep_wd00001'
     if not os.path.exists(directory):
             os.makedirs(directory)
     seed = torch.initial_seed()
