@@ -111,7 +111,7 @@ class BinaryQuadraticModelSampler(NetworkSampler):
     def to_qubo(self):
         bias_v = self.model.b.data.numpy()
         bias_h = self.model.c.data.numpy()
-        W = self.model.W.data
+        W = self.model.W.data.detach().clone()
         V = self.model.V
         # Linear biases
         lin_V = {i: -float(b) for i,b in enumerate(bias_v)}
@@ -255,15 +255,15 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
         target_bqm = self.embedding.embed_bqm(bqm,**embed_kwargs)
+        ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
+        scale_args = {'ignored_interactions':ignoring}
         if auto_scale:
             # Same as target auto_scale but retains scalar
-            ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
-            norm_args = {'bias_range':self.properties['h_range'],
-                         'quadratic_range':self.properties['j_range'],
-                         'ignored_interactions':ignoring}
-            self.scalar = target_bqm.normalize(**norm_args)
+            scale_args.update({'bias_range':self.properties['h_range'],
+                               'quadratic_range':self.properties['j_range']})
+            self.scalar = target_bqm.normalize(**scale_args)
         else:
-            target_bqm.scale(1.0/float(self.beta))
+            target_bqm.scale(1.0/float(self.beta),**scale_args)
 
         return target_bqm
 
