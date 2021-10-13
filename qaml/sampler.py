@@ -226,8 +226,8 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
     target_bqm = None
     target_sampleset = None
 
-    def __init__(self, model, embedding=None, beta=1.0,
-                 failover=False, retry_interval=-1, **config):
+    def __init__(self, model, embedding=None, beta=1.0, failover=False,
+                 retry_interval=-1, **config):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
         dwave.system.DWaveSampler.__init__(self,failover,retry_interval,**config)
         if embedding is None:
@@ -365,9 +365,10 @@ class AdachiQASampler(QASampler):
             chain_subgraphs = [chain_graph.subgraph(c) for c in nx.connected_components(chain_graph)]
 
             if len(chain_subgraphs)>1:
+                total_chain = sum(len(G) for G in chain_subgraphs)
                 for i,G in enumerate(chain_subgraphs):
                     new_embedding[f'{x}_ADACHI_SUBCHAIN_{i}'] = tuple(G.nodes)
-                self.disjoint_chains[x] = len(chain_subgraphs)
+                self.disjoint_chains[x] = (len(chain_subgraphs),total_chain)
             elif len(chain_subgraphs)==1:
                 new_embedding[x] = list(chain_graph.nodes)
             else:
@@ -393,13 +394,14 @@ class AdachiQASampler(QASampler):
                     offset += chain_strength
             elif v in self.disjoint_chains:
                 disjoint_chain = []
-                for i in range(self.disjoint_chains[v]):
+                chains, total_chain = self.disjoint_chains[v]
+                for i in range(chains):
                     v_sub = f'{v}_ADACHI_SUBCHAIN_{i}'
                     disjoint_chain += [q for q in embedding[v_sub]]
                     for p, q in embedding.chain_edges(v_sub):
                         target_bqm.add_interaction(p, q, -chain_strength)
                         offset += chain_strength
-                b = bias / len(disjoint_chain)
+                b = bias / total_chain
                 target_bqm.add_variables_from({u: b for u in disjoint_chain})
             else:
                 raise MissingChainError(v)
@@ -408,11 +410,11 @@ class AdachiQASampler(QASampler):
 
         for (u, v), bias in bqm.quadratic.items():
             if u in self.disjoint_chains:
-                iter_u = [f'{u}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[u])]
+                iter_u = [f'{u}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[u][0])]
             else:
                 iter_u = [u]
             if v in self.disjoint_chains:
-                iter_v = [f'{v}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[v])]
+                iter_v = [f'{v}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[v][0])]
             else:
                 iter_v = [v]
 
