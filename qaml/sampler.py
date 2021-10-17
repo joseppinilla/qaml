@@ -142,7 +142,7 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         """When converting a Boltzmann Machine (BM) model to Ising, first
         formulate as Quadratic Unconstrained Binary Optimization (QUBO) and then
         transfotm to Ising."""
-        self._ising = self.to_qubo().change_vartype('SPIN')
+        self._ising = self.to_qubo().change_vartype('SPIN',inplace=False)
         return self._ising
 
     @property
@@ -217,7 +217,7 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
                      "anneal_schedule":[(0.0,0.0),(0.6,0.6),(10.6,0.6),(11.0,1.0)],
                      "auto_scale":False}
 
-    embed_kwargs = {"chain_strength":1.6}
+    embed_kwargs = {"chain_strength":1.2}
 
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
@@ -250,7 +250,7 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         return self._networkx_graph
 
     def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
-        bqm = self.to_ising()
+        bqm = self.to_ising().copy()
         embedding = self.embedding
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
@@ -265,13 +265,14 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         else:
             target_bqm.scale(1.0/float(self.beta),**scale_args)
 
+        target_bqm.change_vartype('BINARY',inplace=True)
         return target_bqm
 
     def sample(self, **kwargs):
         sample_kwargs = {**self.sample_kwargs,**kwargs}
-        spin_samples = dwave.system.DWaveSampler.sample(self,self.target_bqm,
+        sampleset = dwave.system.DWaveSampler.sample(self,self.target_bqm,
                                                         **sample_kwargs)
-        return spin_samples.change_vartype('BINARY')
+        return sampleset
 
     def unembed_sampleset(self, **kwargs):
         unembed_kwargs = {**self.unembed_kwargs,**kwargs}
@@ -368,7 +369,7 @@ class AdachiQASampler(QASampler):
                 total_chain = sum(len(G) for G in chain_subgraphs)
                 for i,G in enumerate(chain_subgraphs):
                     new_embedding[f'{x}_ADACHI_SUBCHAIN_{i}'] = tuple(G.nodes)
-                self.disjoint_chains[x] = (len(chain_subgraphs),total_chain)
+                self.disjoint_chains[x] = len(chain_subgraphs)
             elif len(chain_subgraphs)==1:
                 new_embedding[x] = list(chain_graph.nodes)
             else:
@@ -376,7 +377,7 @@ class AdachiQASampler(QASampler):
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
     def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
-        bqm = self.to_ising()
+        bqm = self.to_ising().copy()
         embedding = self.embedding
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
@@ -394,14 +395,14 @@ class AdachiQASampler(QASampler):
                     offset += chain_strength
             elif v in self.disjoint_chains:
                 disjoint_chain = []
-                chains, total_chain = self.disjoint_chains[v]
+                chains = self.disjoint_chains[v]
                 for i in range(chains):
                     v_sub = f'{v}_ADACHI_SUBCHAIN_{i}'
                     disjoint_chain += [q for q in embedding[v_sub]]
                     for p, q in embedding.chain_edges(v_sub):
                         target_bqm.add_interaction(p, q, -chain_strength)
                         offset += chain_strength
-                b = bias / total_chain
+                b = bias / len(disjoint_chain)
                 target_bqm.add_variables_from({u: b for u in disjoint_chain})
             else:
                 raise MissingChainError(v)
@@ -410,11 +411,11 @@ class AdachiQASampler(QASampler):
 
         for (u, v), bias in bqm.quadratic.items():
             if u in self.disjoint_chains:
-                iter_u = [f'{u}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[u][0])]
+                iter_u = [f'{u}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[u])]
             else:
                 iter_u = [u]
             if v in self.disjoint_chains:
-                iter_v = [f'{v}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[v][0])]
+                iter_v = [f'{v}_ADACHI_SUBCHAIN_{i}' for i in range(self.disjoint_chains[v])]
             else:
                 iter_v = [v]
 
@@ -423,20 +424,20 @@ class AdachiQASampler(QASampler):
                 for i_v in iter_v:
                     interactions+=list(embedding.interaction_edges(i_u,i_v))
 
-            if interactions:
-                b = bias / len(interactions)
-                target_bqm.add_interactions_from((u,v,b) for u,v in interactions)
+            b = bias / len(interactions)
+            target_bqm.add_interactions_from((u,v,b) for u,v in interactions)
 
+        ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
+        scale_args = {'ignored_interactions':ignoring}
         if auto_scale:
             # Same as target auto_scale but retains scalar
-            ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
-            norm_args = {'bias_range':self.properties['h_range'],
-                         'quadratic_range':self.properties['j_range'],
-                         'ignored_interactions':ignoring}
-            self.scalar = target_bqm.normalize(**norm_args)
+            scale_args.update({'bias_range':self.properties['h_range'],
+                               'quadratic_range':self.properties['j_range']})
+            self.scalar = target_bqm.normalize(**scale_args)
         else:
-            target_bqm.scale(1.0/float(self.beta))
+            target_bqm.scale(1.0/float(self.beta),**scale_args)
 
+        target_bqm.change_vartype('BINARY',inplace=True)
         return target_bqm
 
     def unembed_sampleset(self, **kwargs):
