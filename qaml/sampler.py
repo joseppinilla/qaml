@@ -141,7 +141,7 @@ class BinaryQuadraticModelSampler(NetworkSampler):
     def to_ising(self):
         """When converting a Boltzmann Machine (BM) model to Ising, first
         formulate as Quadratic Unconstrained Binary Optimization (QUBO) and then
-        transfotm to Ising."""
+        transform to Ising."""
         self._ising = self.to_qubo().change_vartype('SPIN',inplace=False)
         return self._ising
 
@@ -317,11 +317,7 @@ class AdachiQASampler(QASampler):
 
     disjoint_chains : dict
 
-    embedding = None
     embedding_orig = None
-
-    target_bqm = None
-    target_sampleset = None
 
     def __init__(self, model, embedding=None, beta=1.0,
                  failover=False, retry_interval=-1, **config):
@@ -455,8 +451,6 @@ class AdachiQASampler(QASampler):
 
 class AdaptiveQASampler(QASampler):
 
-    disjoint_chains : dict
-
     embedding = None
 
     target_bqm = None
@@ -513,8 +507,6 @@ class AdaptiveQASampler(QASampler):
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
 class RepurposeQASampler(QASampler):
-
-    disjoint_chains : dict
 
     embedding = None
 
