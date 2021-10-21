@@ -193,22 +193,27 @@ class ExactNetworkSampler(dimod.ExactSolver,BinaryQuadraticModelSampler):
         BinaryQuadraticModelSampler.__init__(self,model,beta)
         dimod.ExactSolver.__init__(self)
 
-    def forward(self, num_reads=100, **ex_kwargs):
+    def forward(self, num_reads=None, **ex_kwargs):
         beta = self.beta
         bqm = self.to_qubo()
 
         solutions = self.sample(bqm,**ex_kwargs)
         energies = solutions.record['energy']
         Z = np.exp(-beta*energies).sum()
-        P = torch.Tensor(np.exp(-beta*energies/Z))
-        samples = [solutions.record['sample'][i]
-                   for i in torch.multinomial(P,num_reads,replacement=True)]
+        P = torch.Tensor(np.exp(-beta*energies)/Z)
 
-        sampletensor = torch.Tensor(samples)
-        samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
+        if num_reads is None:
+            tensorset = torch.Tensor(solutions.record.sample)
+            prob = torch.matmul(P,tensorset).unsqueeze(0)
+            vs,hs = prob.split([self.model.V,self.model.H],1)
+        else:
+            samples = [solutions.record.sample[i]
+                       for i in torch.multinomial(P,num_reads,replacement=True)]
+            tensorset = torch.Tensor(samples)
+            vs,hs = tensorset.split([self.model.V,self.model.H],1)
 
         self.sampleset = solutions
-        return samples_v, samples_h
+        return vs, hs
 
 class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
                                      BinaryQuadraticModelSampler):
