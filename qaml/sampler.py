@@ -265,13 +265,14 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         else:
             target_bqm.scale(1.0/float(self.beta),**scale_args)
 
-        target_bqm.change_vartype('BINARY',inplace=True)
         return target_bqm
 
     def sample(self, **kwargs):
         sample_kwargs = {**self.sample_kwargs,**kwargs}
         sampleset = dwave.system.DWaveSampler.sample(self,self.target_bqm,
                                                         **sample_kwargs)
+        sampleset.resolve()
+        sampleset.change_vartype('BINARY',inplace=True)
         return sampleset
 
     def unembed_sampleset(self, **kwargs):
@@ -433,7 +434,6 @@ class AdachiQASampler(QASampler):
         else:
             target_bqm.scale(1.0/float(self.beta),**scale_args)
 
-        target_bqm.change_vartype('BINARY',inplace=True)
         return target_bqm
 
     def unembed_sampleset(self, **kwargs):
