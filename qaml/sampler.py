@@ -193,22 +193,27 @@ class ExactNetworkSampler(dimod.ExactSolver,BinaryQuadraticModelSampler):
         BinaryQuadraticModelSampler.__init__(self,model,beta)
         dimod.ExactSolver.__init__(self)
 
-    def forward(self, num_reads=100, **ex_kwargs):
+    def forward(self, num_reads=None, **ex_kwargs):
         beta = self.beta
         bqm = self.to_qubo()
 
         solutions = self.sample(bqm,**ex_kwargs)
         energies = solutions.record['energy']
         Z = np.exp(-beta*energies).sum()
-        P = torch.Tensor(np.exp(-beta*energies/Z))
-        samples = [solutions.record['sample'][i]
-                   for i in torch.multinomial(P,num_reads,replacement=True)]
+        P = torch.Tensor(np.exp(-beta*energies)/Z)
 
-        sampletensor = torch.Tensor(samples)
-        samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
+        if num_reads is None:
+            tensorset = torch.Tensor(solutions.record.sample)
+            prob = torch.matmul(P,tensorset).unsqueeze(0)
+            vs,hs = prob.split([self.model.V,self.model.H],1)
+        else:
+            samples = [solutions.record.sample[i]
+                       for i in torch.multinomial(P,num_reads,replacement=True)]
+            tensorset = torch.Tensor(samples)
+            vs,hs = tensorset.split([self.model.V,self.model.H],1)
 
         self.sampleset = solutions
-        return samples_v, samples_h
+        return vs, hs
 
 class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
                                      BinaryQuadraticModelSampler):
@@ -267,7 +272,7 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
 
         return target_bqm
 
-    def sample(self, **kwargs):
+    def sample_and_change(self, **kwargs):
         sample_kwargs = {**self.sample_kwargs,**kwargs}
         sampleset = dwave.system.DWaveSampler.sample(self,self.target_bqm,
                                                         **sample_kwargs)
@@ -291,7 +296,7 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         unembed_kwargs = {**self.unembed_kwargs,**unembed_kwargs}
 
         self.target_bqm = self.embed_bqm(visible,hidden,**embed_kwargs)
-        self.target_sampleset = self.sample(**sample_kwargs)
+        self.target_sampleset = self.sample_and_change(**sample_kwargs)
         self.sampleset = self.unembed_sampleset(**unembed_kwargs)
 
         samples = self.sampleset.record.sample.copy()
@@ -378,10 +383,10 @@ class AdachiQASampler(QASampler):
         embedding = self.embedding
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
-        offset = 0
         # Create new BQM including new subchains
         chain_strength = embed_kwargs['chain_strength']
         target_bqm = dimod.BinaryQuadraticModel.empty('SPIN')
+        target_bqm.offset += bqm.offset
         for v, bias in bqm.linear.items():
             if v in embedding:
                 chain = embedding[v]
@@ -389,7 +394,7 @@ class AdachiQASampler(QASampler):
                 target_bqm.add_variables_from({u: b for u in chain})
                 for p, q in embedding.chain_edges(v):
                     target_bqm.add_interaction(p, q, -chain_strength)
-                    offset += chain_strength
+                    target_bqm.offset += chain_strength
             elif v in self.disjoint_chains:
                 disjoint_chain = []
                 chains = self.disjoint_chains[v]
@@ -398,13 +403,11 @@ class AdachiQASampler(QASampler):
                     disjoint_chain += [q for q in embedding[v_sub]]
                     for p, q in embedding.chain_edges(v_sub):
                         target_bqm.add_interaction(p, q, -chain_strength)
-                        offset += chain_strength
+                        target_bqm.offset += chain_strength
                 b = bias / len(disjoint_chain)
                 target_bqm.add_variables_from({u: b for u in disjoint_chain})
             else:
                 raise MissingChainError(v)
-
-        target_bqm.add_offset(offset)
 
         for (u, v), bias in bqm.quadratic.items():
             if u in self.disjoint_chains:
