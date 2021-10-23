@@ -68,11 +68,11 @@ class PersistentGibbsNetworkSampler(NetworkSampler):
     def forward(self, num_samples, k=1, init=None):
         beta = self.beta
         prob_vk = self.prob_v.clone() if init is None else init.clone()
-        prob_hk = self.prob_h.clone()
+        prob_hk = self.model.forward(prob_vk.bernoulli(),scale=beta)
 
         for _ in range(k):
-            prob_hk.data = self.model.forward(prob_vk.bernoulli(),scale=beta)
             prob_vk.data = self.model.generate(prob_hk.bernoulli(),scale=beta)
+            prob_hk.data = self.model.forward(prob_vk.bernoulli(),scale=beta)
 
         self.prob_v.data = prob_vk.data
         self.prob_h.data = prob_hk.data
@@ -86,11 +86,11 @@ class GibbsNetworkSampler(NetworkSampler):
     def forward(self, v0, k=1):
         beta = self.beta
         prob_vk = v0.clone()
-        prob_hk = self.prob_h.clone()
+        prob_hk = self.model.forward(prob_vk.bernoulli(),scale=beta)
 
         for _ in range(k):
-            prob_hk.data = self.model.forward(prob_vk.bernoulli(),scale=beta)
             prob_vk.data = self.model.generate(prob_hk.bernoulli(),scale=beta)
+            prob_hk.data = self.model.forward(prob_vk.bernoulli(),scale=beta)
 
         self.prob_v.data = prob_vk.data
         self.prob_h.data = prob_hk.data
