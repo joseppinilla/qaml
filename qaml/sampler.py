@@ -10,6 +10,7 @@ import numpy as np
 import networkx as nx
 import dwave_networkx as dnx
 
+from random import random
 from minorminer.utils.polynomialembedder import processor
 
 class NetworkSampler(torch.nn.Module):
@@ -254,52 +255,71 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         self._networkx_graph = dwave.system.DWaveSampler.to_networkx_graph(self)
         return self._networkx_graph
 
-    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
+    def embed_bqm(self, bqm, **kwargs):
+        return self.embedding.embed_bqm(bqm,**kwargs)
+
+    def sample(self, auto_scale=False,
+               embed_kwargs={}, unembed_kwargs={}, sample_kwargs={}):
         bqm = self.to_ising().copy()
         embedding = self.embedding
-        embed_kwargs = {**self.embed_kwargs,**kwargs}
 
-        target_bqm = self.embedding.embed_bqm(bqm,**embed_kwargs)
-        ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
-        scale_args = {'ignored_interactions':ignoring}
-        if auto_scale:
-            # Same as target auto_scale but retains scalar
-            scale_args.update({'bias_range':self.properties['h_range'],
-                               'quadratic_range':self.properties['j_range']})
-            self.scalar = target_bqm.normalize(**scale_args)
-        else:
-            target_bqm.scale(1.0/float(self.beta),**scale_args)
-
-        return target_bqm
-
-    def sample_and_change(self, **kwargs):
-        sample_kwargs = {**self.sample_kwargs,**kwargs}
-        sampleset = dwave.system.DWaveSampler.sample(self,self.target_bqm,
-                                                        **sample_kwargs)
-        sampleset.resolve()
-        sampleset.change_vartype('BINARY',inplace=True)
-        return sampleset
-
-    def unembed_sampleset(self, **kwargs):
-        unembed_kwargs = {**self.unembed_kwargs,**kwargs}
-
-        sampleset = dwave.embedding.unembed_sampleset(self.target_sampleset,
-                                                      self.embedding,self.qubo,
-                                                      **unembed_kwargs)
-        return sampleset
-
-    def forward(self, num_reads, visible=None, hidden=None, auto_scale=False,
-                embed_kwargs={}, unembed_kwargs={}, **kwargs):
-
-        embed_kwargs = {**self.embed_kwargs,**embed_kwargs,'auto_scale':auto_scale}
-        sample_kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
+        embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
+        sample_kwargs = {**self.sample_kwargs,**sample_kwargs}
         unembed_kwargs = {**self.unembed_kwargs,**unembed_kwargs}
 
-        self.target_bqm = self.embed_bqm(visible,hidden,**embed_kwargs)
-        self.target_sampleset = self.sample_and_change(**sample_kwargs)
-        self.sampleset = self.unembed_sampleset(**unembed_kwargs)
+        responses = []
+        flipped_bqm = bqm.copy()
+        transform = {v: False for v in bqm.variables}
+        num_spin_reversal_transforms = 4
+        for ii in range(num_spin_reversal_transforms):
+            # flip each variable with a 50% chance
+            for v in bqm.variables:
+                if random() > .5:
+                    transform[v] = not transform[v]
+                    flipped_bqm.flip_variable(v)
 
-        samples = self.sampleset.record.sample.copy()
+            target_bqm = self.embed_bqm(flipped_bqm,**embed_kwargs)
+            ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
+            scale_kwargs = {'ignored_interactions':ignoring}
+            if auto_scale:
+                # Same as target auto_scale but retains scalar
+                scale_kwargs.update({'bias_range':self.properties['h_range'],
+                                   'quadratic_range':self.properties['j_range']})
+                self.scalar = target_bqm.normalize(**scale_kwargs)
+            else:
+                target_bqm.scale(1.0/float(self.beta),**scale_kwargs)
+
+
+            target_response = dwave.system.DWaveSampler.sample(self,target_bqm,
+                                                                **sample_kwargs)
+            target_response.resolve()
+            target_response.change_vartype('BINARY',inplace=True)
+
+            flipped_response = self.unembed_sampleset(target_response,**unembed_kwargs)
+
+            tf_idxs = [flipped_response.variables.index(v)
+                       for v, flip in transform.items() if flip]
+
+            flipped_response.record.sample[:, tf_idxs] = 1 - flipped_response.record.sample[:, tf_idxs]
+
+            responses.append(flipped_response)
+
+        return dimod.sampleset.concatenate(responses)
+
+    def unembed_sampleset(self, response, **kwargs):
+        sampleset = dwave.embedding.unembed_sampleset(response,self.embedding,
+                                                      self.qubo,**kwargs)
+        return sampleset
+
+    def forward(self, num_reads, auto_scale=False,
+                embed_kwargs={}, unembed_kwargs={}, **kwargs):
+
+
+        kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
+        sampleset = self.sample(auto_scale,embed_kwargs,unembed_kwargs,kwargs)
+
+
+        samples = sampleset.record.sample.copy()
         sampletensor = torch.tensor(samples,dtype=torch.float32)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
