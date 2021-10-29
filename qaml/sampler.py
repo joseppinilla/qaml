@@ -398,8 +398,7 @@ class AdachiQASampler(QASampler):
                 raise RuntimeError(f"No subgraphs were found for chain: {x}")
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
-    def embed_bqm(self, visible=None, hidden=None, auto_scale=False, **kwargs):
-        bqm = self.to_ising().copy()
+    def embed_bqm(self, bqm, **kwargs):
         embedding = self.embedding
         embed_kwargs = {**self.embed_kwargs,**kwargs}
 
@@ -447,28 +446,14 @@ class AdachiQASampler(QASampler):
             b = bias / len(interactions)
             target_bqm.add_interactions_from((u,v,b) for u,v in interactions)
 
-        ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
-        scale_args = {'ignored_interactions':ignoring}
-        if auto_scale:
-            # Same as target auto_scale but retains scalar
-            scale_args.update({'bias_range':self.properties['h_range'],
-                               'quadratic_range':self.properties['j_range']})
-            self.scalar = target_bqm.normalize(**scale_args)
-        else:
-            target_bqm.scale(1.0/float(self.beta),**scale_args)
-
         return target_bqm
 
-    def unembed_sampleset(self, **kwargs):
-        unembed_kwargs = {**self.unembed_kwargs,**kwargs}
-
+    def unembed_sampleset(self, response, **kwargs):
         pruned_embedding = {v:(q for q in chain if q in self.networkx_graph)
                             for v,chain in self.embedding_orig.items()}
 
-        sampleset = dwave.embedding.unembed_sampleset(self.target_sampleset,
-                                                      pruned_embedding,
-                                                      self.qubo,
-                                                      **unembed_kwargs)
+        sampleset = dwave.embedding.unembed_sampleset(response,pruned_embedding,
+                                                      self.qubo,**kwargs)
 
         return sampleset
 
