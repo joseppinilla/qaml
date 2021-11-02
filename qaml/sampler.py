@@ -218,10 +218,8 @@ class ExactNetworkSampler(dimod.ExactSolver,BinaryQuadraticModelSampler):
 
 class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
                                      BinaryQuadraticModelSampler):
-    sample_kwargs = {"answer_mode":'raw',
-                     "num_spin_reversal_transforms":0,
-                     "anneal_schedule":[(0.0,0.0),(0.6,0.6),(10.6,0.6),(11.0,1.0)],
-                     "auto_scale":False}
+
+    sample_kwargs = {"anneal_schedule":[(.0,.0),(.6,.6),(10.6,.6),(11.0,1.0)]}
 
     embed_kwargs = {"chain_strength":1.2}
 
@@ -229,8 +227,6 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
 
     embedding = None
-    target_bqm = None
-    target_sampleset = None
 
     def __init__(self, model, embedding=None, beta=1.0, failover=False,
                  retry_interval=-1, **config):
@@ -255,11 +251,10 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         self._networkx_graph = dwave.system.DWaveSampler.to_networkx_graph(self)
         return self._networkx_graph
 
-    def embed_bqm(self, bqm, **kwargs):
-        return self.embedding.embed_bqm(bqm,**kwargs)
+    def embed_bqm(self, bqm, **embed_kwargs):
+        return self.embedding.embed_bqm(bqm,**embed_kwargs)
 
-    def sample(self, auto_scale=False,
-               embed_kwargs={}, unembed_kwargs={}, sample_kwargs={}):
+    def sample_rbm(self, embed_kwargs={}, unembed_kwargs={}, **sample_kwargs):
         bqm = self.to_ising().copy()
         embedding = self.embedding
 
@@ -271,9 +266,21 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         flipped_bqm = bqm.copy()
         transform = {v: False for v in bqm.variables}
         num_spin_reversal_transforms = 4
-        for ii in range(num_spin_reversal_transforms):
-            # flip each variable with a 50% chance
-            for v in bqm.variables:
+
+        num_reads = sample_kwargs.pop('num_reads',100)
+        auto_scale = sample_kwargs.pop('auto_scale',False)
+        num_spinrevs = sample_kwargs.pop('num_spin_reversal_transforms',0)
+
+        if num_spinrevs>1:
+            reads_per_transform = num_reads//num_spinrevs
+            iter_num_reads = [reads_per_transform]*(num_spinrevs-1)
+            iter_num_reads += [reads_per_transform+(num_reads%num_spinrevs)]
+        else:
+            iter_num_reads = [num_reads]
+
+        for num_reads in iter_num_reads:
+            # Don't flip if num_spin_reversal_transforms is 0
+            for v in list(bqm.variables)*(num_spinrevs>0):
                 if random() > .5:
                     transform[v] = not transform[v]
                     flipped_bqm.flip_variable(v)
@@ -289,9 +296,10 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
             else:
                 target_bqm.scale(1.0/float(self.beta),**scale_kwargs)
 
-
-            target_response = dwave.system.DWaveSampler.sample(self,target_bqm,
-                                                                **sample_kwargs)
+            target_response = self.sample(target_bqm,num_reads=num_reads,
+                                          auto_scale=False,answer_mode='raw',
+                                          num_spin_reversal_transforms=0,
+                                          **sample_kwargs)
             target_response.resolve()
             target_response.change_vartype('BINARY',inplace=True)
 
@@ -306,20 +314,19 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
 
         return dimod.sampleset.concatenate(responses)
 
-    def unembed_sampleset(self, response, **kwargs):
+    def unembed_sampleset(self, response, **unembed_kwargs):
         sampleset = dwave.embedding.unembed_sampleset(response,self.embedding,
-                                                      self.qubo,**kwargs)
+                                                     self.qubo,**unembed_kwargs)
         return sampleset
 
-    def forward(self, num_reads, auto_scale=False,
-                embed_kwargs={}, unembed_kwargs={}, **kwargs):
+    def forward(self, num_reads, embed_kwargs={}, unembed_kwargs={}, **kwargs):
 
 
         kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
-        sampleset = self.sample(auto_scale,embed_kwargs,unembed_kwargs,kwargs)
+        self.sampleset = self.sample_rbm(embed_kwargs,unembed_kwargs,**kwargs)
 
 
-        samples = sampleset.record.sample.copy()
+        samples = self.sampleset.record.sample.copy()
         sampletensor = torch.tensor(samples,dtype=torch.float32)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
 
@@ -398,9 +405,9 @@ class AdachiQASampler(QASampler):
                 raise RuntimeError(f"No subgraphs were found for chain: {x}")
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
-    def embed_bqm(self, bqm, **kwargs):
+    def embed_bqm(self, bqm, **embed_kwargs):
         embedding = self.embedding
-        embed_kwargs = {**self.embed_kwargs,**kwargs}
+        embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
 
         # Create new BQM including new subchains
         chain_strength = embed_kwargs['chain_strength']
@@ -448,21 +455,16 @@ class AdachiQASampler(QASampler):
 
         return target_bqm
 
-    def unembed_sampleset(self, response, **kwargs):
+    def unembed_sampleset(self, response, **unembed_kwargs):
         pruned_embedding = {v:(q for q in chain if q in self.networkx_graph)
                             for v,chain in self.embedding_orig.items()}
 
         sampleset = dwave.embedding.unembed_sampleset(response,pruned_embedding,
-                                                      self.qubo,**kwargs)
+                                                     self.qubo,**unembed_kwargs)
 
         return sampleset
 
 class AdaptiveQASampler(QASampler):
-
-    embedding = None
-
-    target_bqm = None
-    target_sampleset = None
 
     def __init__(self, model, embedding=None, beta=1.0,
                  failover=False, retry_interval=-1, **config):
@@ -515,11 +517,6 @@ class AdaptiveQASampler(QASampler):
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
 class RepurposeQASampler(QASampler):
-
-    embedding = None
-
-    target_bqm = None
-    target_sampleset = None
 
     def __init__(self, model, embedding=None, beta=1.0,
                  failover=False, retry_interval=-1, **config):
