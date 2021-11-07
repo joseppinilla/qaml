@@ -216,12 +216,12 @@ class ExactNetworkSampler(dimod.ExactSolver,BinaryQuadraticModelSampler):
         self.sampleset = solutions
         return vs, hs
 
-class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
-                                     BinaryQuadraticModelSampler):
+class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
     sample_kwargs = {"anneal_schedule":[(.0,.0),(.6,.6),(10.6,.6),(11.0,1.0)]}
+                    # {"annealing_time":20.0}
 
-    embed_kwargs = {"chain_strength":1.2}
+    embed_kwargs = {"chain_strength":1.6}
 
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
@@ -231,13 +231,13 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
     def __init__(self, model, embedding=None, beta=1.0, failover=False,
                  retry_interval=-1, **config):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
-        dwave.system.DWaveSampler.__init__(self,failover,retry_interval,**config)
+        self.sampler = dwave.system.DWaveSampler(failover,retry_interval,**config)
         if embedding is None:
             if 'Restricted' in repr(self.model):
                 cache = minorminer.busclique.busgraph_cache(self.networkx_graph)
                 embedding = cache.find_biclique_embedding(model.V,model.H)
             else:
-                S = self.bqm.quadratic
+                S = self.qubo.quadratic
                 embedding = minorminer.find_embedding(S,self.networkx_graph)
             if not embedding:
                 warnings.warn("Embedding not found")
@@ -248,7 +248,7 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
         self.scalar = 1.0
 
     def to_networkx_graph(self):
-        self._networkx_graph = dwave.system.DWaveSampler.to_networkx_graph(self)
+        self._networkx_graph = self.sampler.to_networkx_graph()
         return self._networkx_graph
 
     def embed_bqm(self, bqm, **embed_kwargs):
@@ -290,14 +290,14 @@ class QuantumAnnealingNetworkSampler(dwave.system.DWaveSampler,
             scale_kwargs = {'ignored_interactions':ignoring}
             if auto_scale:
                 # Same as target auto_scale but retains scalar
-                scale_kwargs.update({'bias_range':self.properties['h_range'],
-                                   'quadratic_range':self.properties['j_range']})
+                scale_kwargs.update({'bias_range':self.sampler.properties['h_range'],
+                                   'quadratic_range':self.sampler.properties['j_range']})
                 self.scalar = target_bqm.normalize(**scale_kwargs)
             else:
                 target_bqm.scale(1.0/float(self.beta),**scale_kwargs)
 
-            target_response = self.sample(target_bqm,num_reads=num_reads,
-                                          auto_scale=False,answer_mode='raw',
+            target_response = self.sampler.sample(target_bqm,auto_scale=False,
+                                          num_reads=num_reads,answer_mode='raw',
                                           num_spin_reversal_transforms=0,
                                           **sample_kwargs)
             target_response.resolve()
@@ -356,8 +356,8 @@ class AdachiQASampler(QASampler):
                  failover=False, retry_interval=-1, **config):
         QASampler.__init__(self,model,{},beta,failover,retry_interval,**config)
 
-        topology_type = self.properties['topology']['type']
-        shape = self.properties['topology']['shape']
+        topology_type = self.sampler.properties['topology']['type']
+        shape = self.sampler.properties['topology']['shape']
         if topology_type == 'pegasus':
             self.template_graph = dnx.pegasus_graph(shape[0])
             if embedding is None:
@@ -470,8 +470,8 @@ class AdaptiveQASampler(QASampler):
                  failover=False, retry_interval=-1, **config):
         QASampler.__init__(self,model,{},beta,failover,retry_interval,**config)
 
-        topology_type = self.properties['topology']['type']
-        shape = self.properties['topology']['shape']
+        topology_type = self.sampler.properties['topology']['type']
+        shape = self.sampler.properties['topology']['shape']
         if topology_type == 'pegasus':
             self.template_graph = dnx.pegasus_graph(shape[0])
             if embedding is None:
@@ -522,8 +522,8 @@ class RepurposeQASampler(QASampler):
                  failover=False, retry_interval=-1, **config):
         QASampler.__init__(self,model,{},beta,failover,retry_interval,**config)
 
-        topology_type = self.properties['topology']['type']
-        shape = self.properties['topology']['shape']
+        topology_type = self.sampler.properties['topology']['type']
+        shape = self.sampler.properties['topology']['shape']
         if topology_type == 'pegasus':
             self.template_graph = dnx.pegasus_graph(shape[0])
             if embedding is None:
