@@ -21,7 +21,6 @@ class NetworkSampler(torch.nn.Module):
     """
 
     beta : float # Inverse-temperature to match sampler
-    scalar : float # Scaling factor to fit sampler's range
 
     def __init__(self, model, beta=1.0):
         super(NetworkSampler, self).__init__()
@@ -226,6 +225,8 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
 
+
+    scalar : float # Scaling factor to fit sampler's range    
     embedding = None
 
     def __init__(self, model, embedding=None, beta=1.0, failover=False,
