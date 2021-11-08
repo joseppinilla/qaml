@@ -72,17 +72,18 @@ HIDDEN_SIZE = 16
 rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE)
 
 # Initialize biases
-torch.nn.init.constant_(rbm.c,0.5)
-torch.nn.init.zeros_(rbm.c)
-torch.nn.init.uniform_(rbm.W,-0.5,0.5)
+_ = torch.nn.init.uniform_(rbm.c,-0.5,0.5)
+_ = torch.nn.init.zeros_(rbm.c)
+_ = torch.nn.init.uniform_(rbm.W,-0.5,0.5)
 
 # Set up optimizer
-optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
+beta = 2.5
+optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate/beta,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
-beta = 2.5
-solver_name = "Advantage_system1.1"
+auto_scale = True
+solver_name = "Advantage_system4.1"
 qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
 
 # Loss and autograd
@@ -105,8 +106,8 @@ for t in range(EPOCHS):
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
         # Negative Phase
-        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=True)
-        scale = qa_sampler.beta*qa_sampler.scalar
+        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=auto_scale,num_spin_reversal_transforms=4)
+        scale = qa_sampler.scalar*qa_sampler.beta if auto_scale else 1.0
         # Positive Phase
         v0,prob_h0 = input_data,rbm(input_data,scale=scale)
 
@@ -135,8 +136,9 @@ for t in range(EPOCHS):
     ############################## CLASSIFICATION ##################################
     count = 0
     for i,(test_data, test_label) in enumerate(test_loader):
-        prob_hk = rbm(torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1))
-        data_pred,label_pred = rbm.generate(prob_hk).split((DATA_SIZE,LABEL_SIZE),dim=1)
+        recon_data = torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1)
+        recon_hk = rbm(recon_data,scale=scale)
+        data_pred,label_pred = rbm.generate(recon_hk,scale=scale).split((DATA_SIZE,LABEL_SIZE),dim=1)
         if label_pred.argmax() == test_label.argmax():
             count+=1
     accuracy_log.append(count/len(test_idx))

@@ -71,6 +71,11 @@ HIDDEN_SIZE = 16
 # Specify model with dimensions
 rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE)
 
+# Initialize biases
+_ = torch.nn.init.uniform_(rbm.c,-0.5,0.5)
+_ = torch.nn.init.zeros_(rbm.c)
+_ = torch.nn.init.uniform_(rbm.W,-0.5,0.5)
+
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(),
                             lr=learning_rate,
@@ -78,7 +83,8 @@ optimizer = torch.optim.SGD(rbm.parameters(),
                             momentum=momentum)
 
 # Set up training mechanisms
-gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
+beta = 1.0
+gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=beta)
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 
 # %%
@@ -96,7 +102,7 @@ for t in range(EPOCHS):
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data)
+        v0, prob_h0 = input_data, rbm(input_data,scale=beta)
         # Negative Phase
         vk, prob_hk = gibbs_sampler(v0,k=1)
 
@@ -123,8 +129,9 @@ for t in range(EPOCHS):
     ############################## CLASSIFICATION ##################################
     count = 0
     for i,(test_data, test_label) in enumerate(test_loader,start=10):
-        prob_hk = rbm(torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1))
-        _,label_pred = rbm.generate(prob_hk).split((DATA_SIZE,LABEL_SIZE),dim=1)
+        recon_data = torch.cat((test_data.flatten(1),torch.zeros(1,LABEL_SIZE)),dim=1)
+        recon_hk = rbm(recon_data,scale=beta)
+        _,label_pred = rbm.generate(recon_hk,scale=beta).split((DATA_SIZE,LABEL_SIZE),dim=1)
         if label_pred.argmax() == test_label.argmax():
             count+=1
     accuracy_log.append(count/len(test_idx))
@@ -184,4 +191,4 @@ for i,ax in enumerate(axs.flat):
     ms = ax.matshow(weight_matrix, cmap='viridis', vmin=-1, vmax=1)
     ax.axis('off')
 cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
-plt.savefig("classical_weights.png")
+plt.savefig("classical_weights.pdf")
