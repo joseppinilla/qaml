@@ -56,9 +56,10 @@ for path in os.listdir('./bas8x8/'):
 
 ####### PLOT INDIVIDUAL AND SAVE
 for path in os.listdir('./bas8x8/'):
-    fig, ax = plt.subplots()
     abspath = f"./bas8x8/{path}"
     if not os.path.isdir(abspath): continue
+    if not "BAS88" in abspath: continue
+    fig, ax = plt.subplots()
     logs = [torch.load(abspath+f'/{seed}/accuracy.pt') for seed in os.listdir(abspath) if seed.isnumeric()]
     # Create DataFrame and aggreegate
     df = pd.DataFrame(logs)
