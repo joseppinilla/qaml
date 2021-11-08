@@ -25,31 +25,39 @@ train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False,
                                                num_samples=SAMPLES)
 train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,
                                            batch_size=BATCH_SIZE)
+
 beta=1.0
-directory = 'BAS88_01classical5_beta10_200_Adachi_wd0001'
+weight_init = 0.5
+directory = 'BAS88_W05_classical5_beta10_200_wd0001'
 for SEED in [0,2,7,8,42]:
     ######################################## RNG ###################################
     torch.manual_seed(SEED)
+    ############################## Logging Directory ###############################
+    if not os.path.exists(directory):
+            os.makedirs(directory)
+    if not os.path.exists(f'{directory}/{SEED}'):
+            os.makedirs(f'{directory}/{SEED}')
     ################################# Model Definition #############################
     # Specify model with dimensions
     rbm = qaml.nn.RBM(DATA_SIZE, HIDDEN_SIZE)
 
     # Initialize biases
-    torch.nn.init.constant_(rbm.b,0.5)
-    torch.nn.init.zeros_(rbm.c)
-    torch.nn.init.uniform_(rbm.W,-0.1,0.1)
+    _ = torch.nn.init.constant_(rbm.b,0.5)
+    _ = torch.nn.init.zeros_(rbm.c)
+    _ = torch.nn.init.uniform_(rbm.W,-weight_init,weight_init)
 
     # Set up optimizer
-    optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
+    optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
                                 weight_decay=weight_decay,momentum=momentum)
 
     # Set up training mechanisms
     gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=beta)
     CD = qaml.autograd.SampleBasedConstrastiveDivergence()
 
-    mask = torch.load("BAS88_beta25_05noscale_200_batchAdachi_wd001/0/mask.pt")
-    # mask = torch.load("BAS88_beta40_scale_200_Adv_Rep_wd001/0/mask.pt")
-    # mask = torch.load("BAS88_beta40_scale_200_Adv_Rep_wd001/0/mask.pt")
+    # mask = torch.load("./Advantage_system4.1/Adachi/mask.pt")
+    # mask = torch.load("./Advantage_system4.1/Adapt/mask.pt")
+    # mask = torch.load("./Advantage_system4.1/Prio/mask.pt")
+    # mask = torch.load("./Advantage_system4.1/Rep/mask.pt")
     # torch.nn.utils.prune.custom_from_mask(rbm,'W',mask)
     # print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
 
@@ -62,7 +70,7 @@ for SEED in [0,2,7,8,42]:
     c_log = [rbm.c.detach().clone().numpy()]
     W_log = [rbm.W.detach().clone().numpy().flatten()]
     for t in range(EPOCHS):
-        epoch_error = torch.Tensor([0.])
+        epoch_error = 0
         for img_batch, labels_batch in train_loader:
             input_data = img_batch.flatten(1)
 
@@ -84,36 +92,58 @@ for SEED in [0,2,7,8,42]:
             optimizer.step()
 
             #Accumulate error for this epoch
-            epoch_error  += err
+            epoch_error  += err.item()
 
         # Error Log
         b_log.append(rbm.b.detach().clone().numpy())
         c_log.append(rbm.c.detach().clone().numpy())
         W_log.append(rbm.W.detach().clone().numpy().flatten())
-        err_log.append(epoch_error.item())
-        print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
+        err_log.append(epoch_error)
+        print(f"Epoch {t} Reconstruction Error = {epoch_error}")
         ############################## CLASSIFICATION ##################################
         count = 0
-        mask = torch.ones(1,M,N)
         for test_data, test_label in test_dataset:
             test_data[-2:,-1] = 0.5
-            prob_hk = rbm(test_data.flatten(),scale=beta)
-            label_pred = rbm.generate(prob_hk,scale=beta).view(*SHAPE)[-2:,-1]
+            recon_hk = rbm(test_data.flatten(),scale=beta)
+            label_pred = rbm.generate(recon_hk,scale=beta).view(*SHAPE)[-2:,-1]
             if label_pred.argmax() == test_label.argmax():
                 count+=1
         accuracy_log.append(count/TEST)
         print(f"Testing accuracy: {count}/{TEST} ({count/TEST:.2f})")
 
-    ############################## Logging Directory ###############################
-    if not os.path.exists(directory):
-            os.makedirs(directory)
-    seed = torch.initial_seed()
-    if not os.path.exists(f'{directory}/{seed}'):
-            os.makedirs(f'{directory}/{seed}')
-
     # ############################ Store Model and Logs ##############################
-    torch.save(b_log,f"./{directory}/{seed}/b.pt")
-    torch.save(c_log,f"./{directory}/{seed}/c.pt")
-    torch.save(W_log,f"./{directory}/{seed}/W.pt")
-    torch.save(err_log,f"./{directory}/{seed}/err.pt")
-    torch.save(accuracy_log,f"./{directory}/{seed}/accuracy.pt")
+    torch.save(b_log,f"./{directory}/{SEED}/b.pt")
+    torch.save(c_log,f"./{directory}/{SEED}/c.pt")
+    torch.save(W_log,f"./{directory}/{SEED}/W.pt")
+    torch.save(err_log,f"./{directory}/{SEED}/err.pt")
+    torch.save(accuracy_log,f"./{directory}/{SEED}/accuracy.pt")
+
+
+# Testing accuracy graph
+fig, ax = plt.subplots()
+plt.plot(accuracy_log)
+plt.ylabel("Testing Accuracy")
+plt.xlabel("Epoch")
+
+# Visible bias graph
+fig, ax = plt.subplots()
+ax.set_prop_cycle('color', list(plt.get_cmap('turbo',DATA_SIZE).colors))
+lc_v = ax.plot(b_log)
+plt.legend(iter(lc_v),[f'b{i}' for i in range(DATA_SIZE)],ncol=2,bbox_to_anchor=(1,1))
+plt.ylabel("Visible Biases")
+plt.xlabel("Epoch")
+
+# Hidden bias graph
+fig, ax = plt.subplots()
+ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE).colors))
+lc_h = plt.plot(c_log)
+plt.legend(lc_h,[f'c{i}' for i in range(HIDDEN_SIZE)],ncol=2,bbox_to_anchor=(1,1))
+plt.ylabel("Hidden Biases")
+plt.xlabel("Epoch")
+
+# Weights graph
+fig, ax = plt.subplots()
+ax.set_prop_cycle('color', list(plt.get_cmap('turbo',rbm.V*rbm.H).colors))
+lc_w = plt.plot(W_log)
+plt.ylabel("Weights")
+plt.xlabel("Epoch")
