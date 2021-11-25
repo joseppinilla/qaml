@@ -165,19 +165,18 @@ class BinaryQuadraticModelSampler(NetworkSampler):
 
 BQMSampler = BinaryQuadraticModelSampler
 
-class SimulatedAnnealingNetworkSampler(dimod.SimulatedAnnealingSampler,
-                                       BinaryQuadraticModelSampler):
+class SimulatedAnnealingNetworkSampler(BinaryQuadraticModelSampler):
     sa_kwargs = {"num_sweeps":1000}
 
-    def __init__(self, model, beta=1.0):
+    def __init__(self, model, beta=1.0, **kwargs):
         BinaryQuadraticModelSampler.__init__(self,model,beta)
-        dimod.SimulatedAnnealingSampler.__init__(self)
+        self.sampler = dimod.SimulatedAnnealingSampler(**kwargs)
 
     def forward(self, num_reads=100, **kwargs):
         bqm = self.to_qubo()
         bqm.scale(float(self.beta))
         sa_kwargs = {**self.sa_kwargs,**kwargs}
-        sampleset = self.sample(bqm,num_reads=num_reads,**sa_kwargs)
+        sampleset = self.sampler.sample(bqm,num_reads=num_reads,**sa_kwargs)
         samples = sampleset.record.sample.copy()
         sampletensor = torch.tensor(samples,dtype=torch.float32)
         samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
@@ -187,17 +186,17 @@ class SimulatedAnnealingNetworkSampler(dimod.SimulatedAnnealingSampler,
 
 SASampler = SimulatedAnnealingNetworkSampler
 
-class ExactNetworkSampler(dimod.ExactSolver,BinaryQuadraticModelSampler):
+class ExactNetworkSampler(BinaryQuadraticModelSampler):
 
     def __init__(self, model, beta=1.0):
         BinaryQuadraticModelSampler.__init__(self,model,beta)
-        dimod.ExactSolver.__init__(self)
+        self.sampler = dimod.ExactSolver()
 
     def forward(self, num_reads=None, **ex_kwargs):
         beta = self.beta
         bqm = self.to_qubo()
 
-        solutions = self.sample(bqm,**ex_kwargs)
+        solutions = self.sampler.sample(bqm,**ex_kwargs)
         energies = solutions.record['energy']
         Z = np.exp(-beta*energies).sum()
         P = torch.Tensor(np.exp(-beta*energies)/Z)
@@ -217,16 +216,15 @@ class ExactNetworkSampler(dimod.ExactSolver,BinaryQuadraticModelSampler):
 
 class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
-    sample_kwargs = {"anneal_schedule":[(.0,.0),(.6,.6),(10.6,.6),(11.0,1.0)]}
-                    # {"annealing_time":20.0}
+    sample_kwargs = {"annealing_time":20.0}
 
-    embed_kwargs = {"chain_strength":1.6}
+    embed_kwargs = {"chain_strength":1.2}
 
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
 
 
-    scalar : float # Scaling factor to fit sampler's range    
+    scalar : float # Scaling factor to fit sampler's range
     embedding = None
 
     def __init__(self, model, embedding=None, beta=1.0, failover=False,
@@ -281,10 +279,11 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
         for num_reads in iter_num_reads:
             # Don't flip if num_spin_reversal_transforms is 0
-            for v in list(bqm.variables)*(num_spinrevs>0):
-                if random() > .5:
-                    transform[v] = not transform[v]
-                    flipped_bqm.flip_variable(v)
+            if num_spinrevs>0:
+                for v in list(bqm.variables):
+                    if random() > .5:
+                        transform[v] = not transform[v]
+                        flipped_bqm.flip_variable(v)
 
             target_bqm = self.embed_bqm(flipped_bqm,**embed_kwargs)
             ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
