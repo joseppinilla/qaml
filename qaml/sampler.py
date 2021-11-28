@@ -83,6 +83,26 @@ class GibbsNetworkSampler(NetworkSampler):
     def __init__(self, model, beta=1.0):
         super(GibbsNetworkSampler, self).__init__(model,beta)
 
+    @torch.no_grad()
+    def reconstruct(self, input_data, k=1, mask=None):
+        beta = self.beta
+
+        if mask is None:
+            mask = torch.ones_like(input_data)
+        clamp = torch.mul(input_data,mask)
+
+        prob_vk = clamp.clone().masked_fill_((mask==0),0.5)
+        prob_hk = self.model.forward(prob_vk.bernoulli(),scale=beta)
+        for _ in range(k):
+            prob_vk.data = self.model.generate(prob_hk,scale=beta).data
+            masked = clamp + (mask==0)*prob_vk.data
+            prob_hk.data = self.model.forward(masked,scale=beta).data
+
+        self.prob_v.data = masked.data
+        self.prob_h.data = prob_hk.data
+        return masked, prob_hk
+
+    @torch.no_grad()
     def forward(self, v0, k=1):
         beta = self.beta
         prob_vk = v0.clone()
@@ -213,6 +233,60 @@ class ExactNetworkSampler(BinaryQuadraticModelSampler):
 
         self.sampleset = solutions
         return vs, hs
+
+class ExactEmbeddedNetworkSampler(BinaryQuadraticModelSampler):
+
+    def __init__(self, model, beta=1.0, target_graph=None, embedding=None):
+        BinaryQuadraticModelSampler.__init__(self,model,beta)
+
+        if target_graph is None:
+            target_graph = dnx.chimera_graph(16,16,4)
+        self._networkx_graph = target_graph
+
+        struct_sampler = dimod.StructureComposite(dimod.ExactSolver(),
+                                                  list(target_graph.nodes),
+                                                  list(target_graph.edges))
+
+        if embedding is None:
+            if 'Restricted' in repr(self.model):
+                cache = minorminer.busclique.busgraph_cache(self.networkx_graph)
+                embedding = cache.find_biclique_embedding(model.V,model.H)
+            else:
+                S = self.qubo.quadratic
+                embedding = minorminer.find_embedding(S,self.networkx_graph)
+            if not embedding:
+                warnings.warn("Embedding not found")
+
+        if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
+            edgelist = self.networkx_graph.edges
+            embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
+
+        self.embedding = embedding
+        self.sampler = dwave.system.FixedEmbeddingComposite(struct_sampler,
+                                                            embedding)
+
+    def forward(self, num_reads=None, **ex_kwargs):
+        beta = self.beta
+        bqm = self.to_qubo()
+
+        solutions = self.sampler.sample(bqm,**ex_kwargs)
+        energies = solutions.record['energy']
+        Z = np.exp(-beta*energies).sum()
+        P = torch.Tensor(np.exp(-beta*energies)/Z)
+
+        if num_reads is None:
+            tensorset = torch.Tensor(solutions.record.sample)
+            prob = torch.matmul(P,tensorset).unsqueeze(0)
+            vs,hs = prob.split([self.model.V,self.model.H],1)
+        else:
+            samples = [solutions.record.sample[i]
+                       for i in torch.multinomial(P,num_reads,replacement=True)]
+            tensorset = torch.Tensor(samples)
+            vs,hs = tensorset.split([self.model.V,self.model.H],1)
+
+        self.sampleset = solutions
+        return vs, hs
+
 
 class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
