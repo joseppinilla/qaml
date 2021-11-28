@@ -10,6 +10,7 @@ import torch
 torch.manual_seed(0) # For deterministic weights
 
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 import torchvision.transforms as torch_transforms
 
 # %%
@@ -23,7 +24,7 @@ BATCH_SIZE = 400
 TRAIN,TEST = SPLIT = 400,110
 # Stochastic Gradient Descent
 learning_rate = 0.1
-weight_decay = 0.001
+weight_decay = 1e-4
 momentum = 0.5
 
 # %%
@@ -48,9 +49,10 @@ beta = 2.5
 rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE)
 
 # Initialize biases
-_ = torch.nn.init.constant_(rbm.b,0.5)
+weight_init = 4.0
+_ = torch.nn.init.zeros_(rbm.b)
 _ = torch.nn.init.zeros_(rbm.c)
-_ = torch.nn.init.uniform_(rbm.W,-0.5,0.5)
+_ = torch.nn.init.uniform_(rbm.W,-weight_init,weight_init)
 
 # Set up optimizers
 optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
@@ -74,16 +76,19 @@ accuracy_log = []
 b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
-for t in range(50):
+for t in range(200):
     epoch_error = 0
     for img_batch, labels_batch in train_loader:
         input_data = img_batch.flatten(1)
 
         # Negative Phase
-        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=auto_scale)
+        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=auto_scale,num_spin_reversal_transforms=2)
         # Positive Phase
         scale = qa_sampler.scalar*qa_sampler.beta if auto_scale else 1.0
         v0, prob_h0 = input_data, rbm(input_data,scale=scale)
+
+        for g in optimizer.param_groups:
+            g['lr'] = learning_rate/(qa_sampler.scalar*qa_sampler.beta)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -109,11 +114,10 @@ for t in range(50):
     print(f"Epoch {t} Reconstruction Error = {epoch_error}")
     ############################## CLASSIFICATION ##################################
     count = 0
-    mask = torch.ones(1,M,N)
     for test_data, test_label in test_dataset:
         test_data[-2:,-1] = 0.5
-        recon_hk = rbm(test_data.flatten(),scale=scale)
-        label_pred = rbm.generate(recon_hk,scale=scale).view(*SHAPE)[-2:,-1]
+        test_hid = rbm(test_data.flatten(),scale=1.0)
+        label_pred = rbm.generate(test_hid,scale=1.0).view(*SHAPE)[-2:,-1]
         if label_pred.argmax() == test_label.argmax():
             count+=1
     accuracy_log.append(count/TEST)
@@ -121,28 +125,16 @@ for t in range(50):
 
 # %%
 ############################## RECONSTRUCTION ##################################
-k = 5
-hist = {}
-count = 0
-scale = qa_sampler.scalar*qa_sampler.beta
-mask = torch_transforms.functional.erase(torch.ones(1,M,N),2,2,4,4,0).flatten()
-for img, label in bas_dataset:
-    clamped = mask*(img.flatten().detach().clone())
-    prob_hk = rbm.forward(clamped + (1-mask)*0.5,scale=scale)
-    prob_vk = rbm.generate(prob_hk,scale=scale).detach()
-    for _ in range(k):
-        masked = clamped + (1-mask)*prob_vk.data
-        prob_hk.data = rbm.forward(masked,scale=scale).data
-        prob_vk.data = rbm.generate(prob_hk,scale=scale).data
-    recon = (clamped + (1-mask)*prob_vk).bernoulli().view(img.shape)
-    if recon.equal(img):
-        count+=1
-    num = torch.count_nonzero(recon.to(bool).bitwise_xor(img.to(bool))).item()
-    hist[num]=hist.get(num,0)+1
-print(f"Dataset Reconstruction: {count/(TEST+TRAIN):.02}")
-plt.bar(hist.keys(),hist.values())
-plt.ylabel('Frequency')
-plt.xlabel('Incorrect Bits')
+scale = 1.0
+bce = []
+gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=scale)
+mask = torch_transforms.functional.erase(torch.ones(1,M,N),4,4,4,4,0).flatten()
+for img, label in train_dataset:
+    input_data = img.flatten()
+    prob_vk,prob_hk = gibbs_sampler.reconstruct(input_data,k=1,mask=mask)
+    bce.append(F.binary_cross_entropy(input_data,prob_vk).item())
+_ = plt.hist(bce,bins=100)
+
 # %%
 ############################ MODEL VISUALIZATION ###############################
 
@@ -195,7 +187,6 @@ plt.savefig("quantum_W_log.pdf")
 
 # %%
 ################################## ENERGY ######################################
-scale=qa_sampler.scalar*qa_sampler.beta
 data_energies = []
 for img,label in bas_dataset:
     data = img.flatten()
@@ -207,14 +198,14 @@ for img in rand_data:
     rand_energies.append(rbm.free_energy(img.bernoulli()).item())
 
 gibbs_energies = []
-gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=scale)
+gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=1.0)
 for img,label in bas_dataset:
     data = img.flatten()
-    prob_v,prob_h = gibbs_sampler(data,k=50)
+    prob_v,prob_h = gibbs_sampler(data,k=5)
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
 qa_energies = []
-qa_sampleset = qa_sampler(num_reads=BATCH_SIZE,auto_scale=True)
+qa_sampleset = qa_sampler(num_reads=BATCH_SIZE,auto_scale=True,num_spin_reversal_transforms=2)
 for s_v,s_h in zip(*qa_sampleset):
     qa_energies.append(rbm.free_energy(s_v.detach()).item())
 
@@ -256,9 +247,9 @@ plt.savefig("quantum_weights.pdf")
 
 # %%
 ########################### Check parameter range ##############################
-h_range = qa_sampler.properties['h_range']
-J_range = qa_sampler.properties['extended_j_range']
-target_ising = qa_sampler.embed_bqm()
+h_range = qa_sampler.sampler.properties['h_range']
+J_range = qa_sampler.sampler.properties['extended_j_range']
+target_ising = qa_sampler.embed_bqm(qa_sampler.to_ising(),chain_strength=0.8)
 linear = target_ising.linear.values()
 quad = target_ising.quadratic.values()
 print(f"Linear range [{min(linear):.2} <> {max(linear):.2}] @ device={h_range}")

@@ -10,6 +10,7 @@ import torch
 torch.manual_seed(0) # For deterministic weights
 
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 import torchvision.transforms as torch_transforms
 
 # %%
@@ -75,9 +76,8 @@ for t in range(EPOCHS):
     for img_batch, labels_batch in train_loader:
         input_data = img_batch.flatten(1)
 
-        scale = beta
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,scale=scale)
+        v0, prob_h0 = input_data, rbm(input_data,scale=beta)
         # Negative Phase
         vk, prob_hk = gibbs_sampler(v0.detach(), k=5)
 
@@ -106,8 +106,8 @@ for t in range(EPOCHS):
     count = 0
     for test_data, test_label in test_dataset:
         test_data[-2:,-1] = 0.5
-        prob_hk = rbm(test_data.flatten(),scale=scale)
-        label_pred = rbm.generate(prob_hk,scale=scale).view(*SHAPE)[-2:,-1]
+        prob_hk = rbm(test_data.flatten(),scale=beta)
+        label_pred = rbm.generate(prob_hk,scale=beta).view(*SHAPE)[-2:,-1]
         if label_pred.argmax() == test_label.argmax():
             count+=1
     accuracy_log.append(count/TEST)
@@ -115,25 +115,13 @@ for t in range(EPOCHS):
 
 # %%
 ############################## RECONSTRUCTION ##################################
-k = 10
-hist = {}
-count = 0
-mask = torch_transforms.functional.erase(torch.ones(1,M,N),2,2,4,4,0).flatten()
+bce = []
+mask = torch_transforms.functional.erase(torch.ones(1,M,N),4,4,4,4,0).flatten()
 for img, label in train_dataset:
-    clamped = mask*(img.flatten().detach().clone())
-    prob_hk = rbm.forward(clamped + (1-mask)*0.5,scale=scale)
-    prob_vk = rbm.generate(prob_hk,scale=scale).detach()
-    for _ in range(k):
-        masked = clamped + (1-mask)*prob_vk.data
-        prob_hk.data = rbm.forward(masked,scale=scale).data
-        prob_vk.data = rbm.generate(prob_hk,scale=scale).data
-    recon = (clamped + (1-mask)*prob_vk).bernoulli().view(img.shape)
-    if recon.equal(img):
-        count+=1
-    num = torch.count_nonzero(recon.to(bool).bitwise_xor(img.to(bool))).item()
-    hist[num]=hist.get(num,0)+1
-print(f"Dataset Reconstruction: {count/(TEST+TRAIN):.02}")
-plt.bar(hist.keys(),hist.values())
+    input_data = img.flatten()
+    prob_vk,prob_hk = gibbs_sampler.reconstruct(input_data,k=5,mask=mask)
+    bce.append(F.binary_cross_entropy(input_data,prob_vk).item())
+_ = plt.hist(bce,bins=100)
 
 # %%
 ############################ MODEL VISUALIZATION ###############################

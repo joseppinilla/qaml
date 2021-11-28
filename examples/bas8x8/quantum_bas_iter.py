@@ -15,7 +15,7 @@ BATCH_SIZE = 400
 TRAIN,TEST = SPLIT = 400,110
 # Stochastic Gradient Descent
 learning_rate = 0.1
-weight_decay = 0.001
+weight_decay = 1e-4
 momentum = 0.5
 
 #################################### Input Data ################################
@@ -28,7 +28,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,
 
 beta = 2.5
 weight_init = 0.1
-auto_scale = False
+auto_scale = True
 num_reads = BATCH_SIZE
 
 sampler_type = 'Adv'
@@ -71,17 +71,17 @@ for SEED in [0]:
         qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
         qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
         print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
-        torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{SEED}/mask.pt")
+        torch.save(rbm.state_dict()['W_mask'],f"./{solver_name}/{sampler_type}/mask.pt")
     elif sampler_type == 'Prio':
         qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
         qaml.prune.priority_embedding_unstructured(rbm,'W',qa_sampler,priority=[rbm.V-1,rbm.V-8-1])
         print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
-        torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{SEED}/mask.pt")
+        torch.save(rbm.state_dict()['W_mask'],f"./{solver_name}/{sampler_type}/mask.pt")
     elif sampler_type == 'Rep':
         qa_sampler = qaml.sampler.RepurposeQASampler(rbm,solver=solver_name,beta=beta)
         qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
         print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
-        torch.save(rbm.state_dict()['W_mask'],f"./{directory}/{SEED}/mask.pt")
+        torch.save(rbm.state_dict()['W_mask'],f"./{solver_name}/{sampler_type}/mask.pt")
 
     # Loss and autograd
     CD = qaml.autograd.SampleBasedConstrastiveDivergence()
@@ -100,7 +100,7 @@ for SEED in [0]:
     b_log = [rbm.b.detach().clone().numpy()]
     c_log = [rbm.c.detach().clone().numpy()]
     W_log = [rbm.W.detach().clone().numpy().flatten()]
-    for t in range(50):
+    for t in range(EPOCHS):
         epoch_error = 0
         for img_batch, labels_batch in train_loader:
             input_data = img_batch.flatten(1)
