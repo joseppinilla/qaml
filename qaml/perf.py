@@ -5,13 +5,16 @@ import numpy as np
 
 from collections import Counter
 
-def distance_from_gibbs(model, samples, beta_range=None, num_samples=1e4, k=5):
+def distance_from_gibbs(model, samples, beta_range=None, num_samples=1e4, k=None):
     """ Test a range of inverse temperature values to find the closests match
         to the given distribution. Proximity to a Gibbs distribution doesn't
         directly
         Arg:
+            model (qaml.nn.BoltzmannMachine):
             samples (tensor):
-            sampler (qaml.sampler.NetworkSampler):
+            beta_range (iterable or None):
+            num_samples (int):
+            k (int or None):
         Return:
             beta (float):
             distance (float):
@@ -23,13 +26,18 @@ def distance_from_gibbs(model, samples, beta_range=None, num_samples=1e4, k=5):
     unique, counts = np.unique(E_samples.numpy(), return_counts=True)
     hist_samples = dict(zip(unique, counts/len(E_samples)))
 
-    gibbs_sampler = qaml.sampler.GibbsNetworkSampler(model)
+    if k is None:
+        ref_sampler = qaml.sampler.ExactNetworkSampler(model)
+        sample = lambda n: ref_sampler(n)
+    else:
+        ref_sampler = qaml.sampler.GibbsNetworkSampler(model)
+        sample = lambda n: ref_sampler(torch.rand(n,model.V),k=k)
 
     beta_eff = 1.0
     distance = float('inf')
     for beta_i in beta_range:
-        gibbs_sampler.beta = beta_i
-        vk,hk = gibbs_sampler(torch.rand(num_samples,model.V),k=k)
+        ref_sampler.beta = beta_i
+        vk,hk = sample(num_samples)
         E_gibbs = model.energy(vk.bernoulli(),hk.bernoulli())
         unique, counts = np.unique(E_gibbs.numpy(), return_counts=True)
         hist_gibbs = dict(zip(unique, counts/num_samples))
