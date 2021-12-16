@@ -5,6 +5,7 @@ import numpy as np
 
 from collections import Counter
 
+@torch.no_grad()
 def distance_from_gibbs(model, samples, beta_range=None, num_samples=1e4, k=None):
     """ Test a range of inverse temperature values to find the closests match
         to the given distribution. Proximity to a Gibbs distribution doesn't

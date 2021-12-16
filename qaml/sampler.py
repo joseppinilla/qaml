@@ -324,8 +324,23 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         self._networkx_graph = self.sampler.to_networkx_graph()
         return self._networkx_graph
 
-    def embed_bqm(self, bqm, **embed_kwargs):
-        return self.embedding.embed_bqm(bqm,**embed_kwargs)
+    def embed_bqm(self, bqm=None, auto_scale=False, **embed_kwargs):
+        if bqm is None:
+            bqm = self.to_ising().copy()
+
+        embedding = self.embedding
+
+        target_bqm = embedding.embed_bqm(bqm,**embed_kwargs)
+        ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
+        scale_kwargs = {'ignored_interactions':ignoring}
+        if auto_scale:
+            # Same as target auto_scale but retains scalar
+            scale_kwargs.update({'bias_range':self.sampler.properties['h_range'],
+                               'quadratic_range':self.sampler.properties['j_range']})
+            self.scalar = target_bqm.normalize(**scale_kwargs)
+        else:
+            target_bqm.scale(1.0/float(self.beta),**scale_kwargs)
+        return target_bqm
 
     def sample_rbm(self, embed_kwargs={}, unembed_kwargs={}, **sample_kwargs):
         bqm = self.to_ising().copy()
@@ -359,17 +374,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
                         transform[v] = not transform[v]
                         flipped_bqm.flip_variable(v)
 
-            target_bqm = self.embed_bqm(flipped_bqm,**embed_kwargs)
-            ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
-            scale_kwargs = {'ignored_interactions':ignoring}
-            if auto_scale:
-                # Same as target auto_scale but retains scalar
-                scale_kwargs.update({'bias_range':self.sampler.properties['h_range'],
-                                   'quadratic_range':self.sampler.properties['j_range']})
-                self.scalar = target_bqm.normalize(**scale_kwargs)
-            else:
-                target_bqm.scale(1.0/float(self.beta),**scale_kwargs)
-
+            target_bqm = self.embed_bqm(flipped_bqm,auto_scale,**embed_kwargs)
             target_response = self.sampler.sample(target_bqm,auto_scale=False,
                                           num_reads=num_reads,answer_mode='raw',
                                           num_spin_reversal_transforms=0,
