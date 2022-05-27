@@ -5,9 +5,9 @@
 # Developed by: Jose Pinilla
 # %%
 # Required packages
+import os
 import qaml
 import torch
-torch.manual_seed(0) # For deterministic weights
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -66,15 +66,19 @@ test_loader = torch.utils.data.DataLoader(test_dataset,sampler=sampler)
 # %%
 ################################# Model Definition #############################
 VISIBLE_SIZE = DATA_SIZE + LABEL_SIZE
-HIDDEN_SIZE = 16
+HIDDEN_SIZE = 64
 
 # Specify model with dimensions
 rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE)
 
+
 # Initialize biases
-_ = torch.nn.init.uniform_(rbm.c,-0.5,0.5)
-_ = torch.nn.init.zeros_(rbm.c)
-_ = torch.nn.init.uniform_(rbm.W,-0.5,0.5)
+SEED = 8
+weight_init = 1.0
+torch.manual_seed(SEED)
+_ = torch.nn.init.uniform_(rbm.c,-weight_init,weight_init)
+_ = torch.nn.init.uniform_(rbm.c,-weight_init,weight_init)
+_ = torch.nn.init.uniform_(rbm.W,-weight_init,weight_init)
 
 # Set up optimizer
 beta = 2.5
@@ -83,8 +87,35 @@ optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate/beta,
 
 # Set up training mechanisms
 auto_scale = True
+sampler_type = 'Adv'
 solver_name = "Advantage_system4.1"
-qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+
+if not os.path.exists(f"./{solver_name}/{sampler_type}/"):
+    os.makedirs(f"./{solver_name}/{sampler_type}/")
+
+# Set up training mechanisms
+if sampler_type == 'Adv':
+    qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+elif sampler_type == 'Adachi':
+    qa_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
+    qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
+    print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+    torch.save(rbm.state_dict()['W_mask'],f"./{solver_name}/{sampler_type}/mask.pt")
+elif sampler_type == 'Adapt':
+    qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
+    qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
+    print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+    torch.save(rbm.state_dict()['W_mask'],f"./{solver_name}/{sampler_type}/mask.pt")
+elif sampler_type == 'Prio':
+    qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
+    qaml.prune.priority_embedding_unstructured(rbm,'W',qa_sampler,priority=[rbm.V-1,rbm.V-8-1])
+    print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+    torch.save(rbm.state_dict()['W_mask'],f"./{solver_name}/{sampler_type}/mask.pt")
+elif sampler_type == 'Rep':
+    qa_sampler = qaml.sampler.RepurposeQASampler(rbm,solver=solver_name,beta=beta)
+    qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
+    print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+    torch.save(rbm.state_dict()['W_mask'],f"./{solver_name}/{sampler_type}/mask.pt")
 
 # Loss and autograd
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
@@ -106,7 +137,8 @@ for t in range(EPOCHS):
         input_data = torch.cat((img_batch.flatten(1),labels_batch.flatten(1)),1)
 
         # Negative Phase
-        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=auto_scale,num_spin_reversal_transforms=4)
+        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=auto_scale,
+                                 anneal_offsets=offsets,num_spin_reversal_transforms=4)
         scale = qa_sampler.scalar*qa_sampler.beta if auto_scale else 1.0
         # Positive Phase
         v0,prob_h0 = input_data,rbm(input_data,scale=scale)
@@ -146,13 +178,27 @@ for t in range(EPOCHS):
 
 # %%
 ############################ MODEL VISUALIZATION ###############################
+directory = f"{sampler_type}{HIDDEN_SIZE}_beta{beta}"
+directory = directory.replace('.','')
+
+if not os.path.exists(directory):
+        os.makedirs(directory)
+if not os.path.exists(f'{directory}/{SEED}'):
+        os.makedirs(f'{directory}/{SEED}')
+
+torch.save(b_log,f"./{directory}/{SEED}/b.pt")
+torch.save(c_log,f"./{directory}/{SEED}/c.pt")
+torch.save(W_log,f"./{directory}/{SEED}/W.pt")
+torch.save(err_log,f"./{directory}/{SEED}/err.pt")
+torch.save(scalar_log,f"./{directory}/{SEED}/scalar.pt")
+torch.save(accuracy_log,f"./{directory}/{SEED}/accuracy.pt")
 
 # Testing accuracy graph
 fig, ax = plt.subplots()
 plt.plot(accuracy_log)
 plt.ylabel("Testing Accuracy")
 plt.xlabel("Epoch")
-plt.savefig("quantum_accuracy.pdf")
+plt.savefig("accuracy.pdf")
 
 # Scalar graph
 fig, ax = plt.subplots()

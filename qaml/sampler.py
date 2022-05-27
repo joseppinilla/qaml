@@ -173,7 +173,7 @@ class BinaryQuadraticModelSampler(NetworkSampler):
             return self._ising
 
     def to_networkx_graph(self):
-        self._networkx_graph = self.bqm.to_networkx_graph()
+        self._networkx_graph = self._ising.to_networkx_graph()
         return self._networkx_graph
 
     @property
@@ -290,9 +290,9 @@ class ExactEmbeddedNetworkSampler(BinaryQuadraticModelSampler):
 
 class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
-    sample_kwargs = {"annealing_time":20.0}
+    sample_kwargs = {"annealing_time":20.0,"label":"QARBM-DEV"}
 
-    embed_kwargs = {"chain_strength":1.2}
+    embed_kwargs = {"chain_strength":1.6}
 
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
