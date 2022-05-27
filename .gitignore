@@ -4,6 +4,9 @@
 *.gif
 *.png
 *.pdf
+*.svg
+*.eps
+*.csv
 
 qaml.egg-info/
 data/
