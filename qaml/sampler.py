@@ -212,6 +212,25 @@ class ExactNetworkSampler(BinaryQuadraticModelSampler):
         BinaryQuadraticModelSampler.__init__(self,model,beta)
         self.sampler = dimod.ExactSolver()
 
+    @torch.no_grad()
+    def get_energies(self, **ex_kwargs):
+        if self.sampleset is None:
+            bqm = self.to_qubo()
+            solutions = self.sampler.sample(bqm,**ex_kwargs)
+            self.sampleset = solutions
+        else:
+            solutions = self.sampleset
+
+        return solutions.record['energy']
+
+    @torch.no_grad()
+    def get_probabilities(self, **ex_kwargs):
+        beta = self.beta
+        energies = self.get_energies(**ex_kwargs)
+        Z = np.exp(-beta*energies).sum()
+        P = np.exp(-beta*energies)/Z
+        return energies, P, Z
+
     def forward(self, num_reads=None, **ex_kwargs):
         beta = self.beta
         bqm = self.to_qubo()
@@ -226,8 +245,8 @@ class ExactNetworkSampler(BinaryQuadraticModelSampler):
             prob = torch.matmul(P,tensorset).unsqueeze(0)
             vs,hs = prob.split([self.model.V,self.model.H],1)
         else:
-            samples = [solutions.record.sample[i]
-                       for i in torch.multinomial(P,num_reads,replacement=True)]
+            idx = torch.multinomial(P,num_reads,replacement=True)
+            samples = solutions.record.sample[idx]
             tensorset = torch.Tensor(samples)
             vs,hs = tensorset.split([self.model.V,self.model.H],1)
 
