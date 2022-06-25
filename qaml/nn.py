@@ -1,8 +1,9 @@
 import torch
+import numpy as np
 import torch.nn.functional as F
 
-class BoltzmannMachine(torch.nn.Module):
-    r"""Boltzmann Machine.
+class EnergyBasedModel(torch.nn.Module):
+    r"""Energy-Based Model
     Args:
         V (int): The size of the visible layer.
         H (int): The size of the hidden layer.
@@ -11,18 +12,25 @@ class BoltzmannMachine(torch.nn.Module):
     H : int # Hidden nodes
 
     def __init__(self, V, H):
-        super(BM, self).__init__()
+        super(EnergyBasedModel, self).__init__()
         self.V = V
         self.H = H
 
     @property
+    @torch.no_grad()
     def matrix(self):
         """A triangular matrix representation of the network, this exists
         regardless of the topology. PyTorch doesn't have an efficient triangular
         matrix representation.
         """
-        # TODO
-        return
+        V,H = self.V,self.H
+        A = torch.diag(torch.cat((self.b,self.c)))
+        A[:V,V:] = self.W.T
+        vi,vj = np.triu_indices(V,1)
+        A[vi,vj] = self.vv
+        hi,hj = np.triu_indices(H,1)
+        A[V+hi,V+hj] = self.hh
+        return A.detach().numpy()
 
     def energy(self, visible, hidden):
         # TODO using matrix
@@ -35,9 +43,36 @@ class BoltzmannMachine(torch.nn.Module):
     def forward(self, visible):
         return
 
+EBM = EnergyBasedModel
+
+class BoltzmannMachine(EnergyBasedModel):
+    r"""Boltzmann Machine
+    Args:
+        V (int): The size of the visible layer.
+        H (int): The size of the hidden layer.
+    """
+    V : int # Visible nodes
+    H : int # Hidden nodes
+
+    def __init__(self, V, H):
+        super(BoltzmannMachine, self).__init__(V,H)
+        self.V = V
+        self.H = H
+        # Visible linear bias
+        self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
+        # Hidden linear bias
+        self.c = torch.nn.Parameter(torch.randn(H)*0.1,requires_grad=True)
+        # Visible-Visible quadratic bias
+        self.vv = torch.nn.Parameter(torch.randn(V*(V-1)//2)*0.1,requires_grad=True)
+        # Hidden-Hidden quadratic bias
+        self.hh = torch.nn.Parameter(torch.randn(H*(H-1)//2)*0.1,requires_grad=True)
+        # Visible-Hidden quadratic bias
+        self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
+
+
 BM = BoltzmannMachine
 
-class RestrictedBoltzmannMachine(BoltzmannMachine):
+class RestrictedBoltzmannMachine(EnergyBasedModel):
     r"""A Boltzmann Machine with connectivity restricted to only between visible
     and hidden units.
 
@@ -45,22 +80,23 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
         V (int): The size of the visible layer.
         H (int): The size of the hidden layer.
     """
+    V : int # Visible nodes
+    H : int # Hidden nodes
 
     def __init__(self, V, H):
         super(RestrictedBoltzmannMachine, self).__init__(V,H)
+        self.V = V
+        self.H = H
         # Visible linear bias
         self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
         # Hidden linear bias
         self.c = torch.nn.Parameter(torch.randn(H)*0.1,requires_grad=True)
+        # Visible-Visible quadratic bias
+        self.vv = None
+        # Hidden-Hidden quadratic bias
+        self.hh = None
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
-
-    @property
-    def matrix(self):
-        """A triangular matrix representation of biases and edge weights"""
-        A = torch.diag(torch.cat(self.b,self.c))
-        A[self.V:,:self.V] = self.W
-        return A
 
     def generate(self, hidden, scale=1.0):
         """Sample from visible. P(V) = σ(HW^T + b)"""
@@ -134,12 +170,24 @@ class RestrictedBoltzmannMachine(BoltzmannMachine):
 
 RBM = RestrictedBoltzmannMachine
 
-class LimitedBoltzmannMachine(BoltzmannMachine):
+class LimitedBoltzmannMachine(EnergyBasedModel):
     """ TODO: A Boltzmann Machine with added connections between visible-hidden
     and hidden-hidden units.
     """
-    def __init__(self,V_in,H_out):
-        pass
+    def __init__(self,V,H):
+        super(LimitedBoltzmannMachine, self).__init__(V,H)
+        self.V = V
+        self.H = H
+        # Visible linear bias
+        self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
+        # Hidden linear bias
+        self.c = torch.nn.Parameter(torch.randn(H)*0.1,requires_grad=True)
+        # Visible-Visible quadratic bias
+        self.vv = None
+        # Hidden-Hidden quadratic bias
+        self.hh = torch.nn.Parameter(torch.randn(H*(H-1)//2)*0.1,requires_grad=True)
+        # Visible-Hidden quadratic bias
+        self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
 
     def forward(self, visible):
         pass

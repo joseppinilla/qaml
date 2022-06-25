@@ -16,7 +16,7 @@ from minorminer.utils.polynomialembedder import processor
 class NetworkSampler(torch.nn.Module):
     r""" Sample generator for the probabilistic model provided.
     Args:
-        model (e.g BotlzmannMachine): Generative Network Model
+        model (e.g BoltzmannMachine): Generative Network Model
         beta (float, optional): Inverse temperature for the distribution.
     """
 
@@ -127,6 +127,11 @@ class BinaryQuadraticModelSampler(NetworkSampler):
 
     def __init__(self, model, beta=1.0):
         super(BinaryQuadraticModelSampler, self).__init__(model,beta)
+
+    def matrix_to_qubo(self):
+        M = self.model.matrix
+        self._qubo = dimod.BinaryQuadraticModel.from_numpy_matrix(M)
+        return self._qubo
 
     def to_qubo(self):
         bias_v = self.model.b.data.numpy()
