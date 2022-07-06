@@ -22,7 +22,7 @@ def distance_from_gibbs(model, samples, beta_range=None):
     sampleset = torch.cat(samples,1).tolist()
     E_samples = solver.to_qubo().energies(sampleset)
     unique, counts = np.unique(E_samples, return_counts=True)
-    hist_samples = dict(zip(unique, counts/len(E_samples)))
+    EP_samples = dict(zip(unique, counts/len(E_samples)))
 
     dist_eff = float('inf')
     energies = solver.get_energies()
@@ -40,11 +40,7 @@ def distance_from_gibbs(model, samples, beta_range=None):
 
         dist_i = sum(EP_diff.values())/2
 
-        if dist_i < dist_eff:
-            dist_eff = dist_i
-            beta_eff = beta_i
-
-    return beta_eff, dist_eff.item()
+        yield beta_i, dist_i.item()
 
 
 @torch.no_grad()

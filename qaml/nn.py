@@ -1,4 +1,5 @@
 import torch
+import dimod
 import numpy as np
 import torch.nn.functional as F
 
@@ -26,10 +27,12 @@ class EnergyBasedModel(torch.nn.Module):
         V,H = self.V,self.H
         A = torch.diag(torch.cat((self.b,self.c)))
         A[:V,V:] = self.W.T
-        vi,vj = np.triu_indices(V,1)
-        A[vi,vj] = self.vv
-        hi,hj = np.triu_indices(H,1)
-        A[V+hi,V+hj] = self.hh
+        if self.vv is not None:
+            vi,vj = np.triu_indices(V,1)
+            A[vi,vj] = self.vv
+        if self.hh is not None:
+            hi,hj = np.triu_indices(H,1)
+            A[V+hi,V+hj] = self.hh
         return A.detach().numpy()
 
     def energy(self, visible, hidden):
@@ -40,8 +43,11 @@ class EnergyBasedModel(torch.nn.Module):
         # TODO using matrix
         return
 
+    def generate(self, visible):
+        raise NotImplementedError("This model doesn't support generate()")
+
     def forward(self, visible):
-        return
+        raise NotImplementedError("This model doesn't support forward()")
 
 EBM = EnergyBasedModel
 
@@ -188,8 +194,5 @@ class LimitedBoltzmannMachine(EnergyBasedModel):
         self.hh = torch.nn.Parameter(torch.randn(H*(H-1)//2)*0.1,requires_grad=True)
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
-
-    def forward(self, visible):
-        pass
 
 LBM = LimitedBoltzmannMachine

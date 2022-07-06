@@ -1,4 +1,5 @@
 import copy
+import qaml
 import torch
 import dimod
 import warnings
@@ -62,6 +63,8 @@ class PersistentGibbsNetworkSampler(NetworkSampler):
 
     """
     def __init__(self, model, num_chains, beta=1.0):
+        if 'Restricted' not in repr(model):
+            raise RuntimeError("Not Supported")
         super(PersistentGibbsNetworkSampler, self).__init__(model,beta)
         self.prob_v.data = torch.rand(num_chains,model.V)
 
@@ -81,6 +84,8 @@ class PersistentGibbsNetworkSampler(NetworkSampler):
 class GibbsNetworkSampler(NetworkSampler):
 
     def __init__(self, model, beta=1.0):
+        if 'Restricted' not in repr(model):
+            raise RuntimeError("Not Supported")
         super(GibbsNetworkSampler, self).__init__(model,beta)
 
     @torch.no_grad()
@@ -128,32 +133,13 @@ class BinaryQuadraticModelSampler(NetworkSampler):
     def __init__(self, model, beta=1.0):
         super(BinaryQuadraticModelSampler, self).__init__(model,beta)
 
-    def matrix_to_qubo(self):
+    @torch.no_grad()
+    def to_qubo(self):
+        """Obtain the Quadractic Unconstrained Binary Optimization proble
+        representation of the model to be sampled. Use the full matrix
+        representation of the model. Edges with 0.0 bias are ignored."""
         M = self.model.matrix
         self._qubo = dimod.BinaryQuadraticModel.from_numpy_matrix(M)
-        return self._qubo
-
-    def to_qubo(self):
-        bias_v = self.model.b.data.numpy()
-        bias_h = self.model.c.data.numpy()
-        W = self.model.W.data.detach().clone()
-        V = self.model.V
-        # Linear biases
-        lin_V = {i: -float(b) for i,b in enumerate(bias_v)}
-        lin_H = {j: -float(c) for j,c in enumerate(bias_h)}
-        linear = {**lin_V,**{V+j: c for j,c in lin_H.items()}}
-
-        # To prune BQM from mask
-        mask = self.model.state_dict().get('W_mask',torch.ones_like(W))
-
-        # Quadratic weights
-        quadratic = {}
-        for i in lin_V:
-            for j in lin_H:
-                if mask[j][i]:
-                    quadratic[(i,V+j)] = -float(W[j][i])
-
-        self._qubo = dimod.BinaryQuadraticModel(linear,quadratic,'BINARY')
         return self._qubo
 
     @property
@@ -325,80 +311,81 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
     scalar : float # Scaling factor to fit sampler's range
     embedding = None
 
-    def __init__(self, model, embedding=None, beta=1.0, failover=False,
-                 retry_interval=-1, **config):
+    def __init__(self, model, embedding=None, beta=1.0, auto_scale=True,
+                 chain_imbalance=None, failover=False, retry_interval=-1,
+                 **config):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
+        bqm = self.to_qubo()
         self.sampler = dwave.system.DWaveSampler(failover,retry_interval,**config)
+        target = self.networkx_graph
         if embedding is None:
             if 'Restricted' in repr(self.model):
-                cache = minorminer.busclique.busgraph_cache(self.networkx_graph)
+                cache = minorminer.busclique.busgraph_cache(target)
                 embedding = cache.find_biclique_embedding(model.V,model.H)
             else:
-                S = self.qubo.quadratic
-                embedding = minorminer.find_embedding(S,self.networkx_graph)
+                cache = minorminer.busclique.busgraph_cache(target)
+                embedding = cache.find_clique_embedding(model.V + model.H)
             if not embedding:
                 warnings.warn("Embedding not found")
+        if chain_imbalance is None:
+            source = dimod.to_networkx_graph(bqm)
+            embedding = qaml.prune.trim_embedding(target,embedding,source)
         if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
-            edgelist = self.networkx_graph.edges
-            embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
+            embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
         self.embedding = embedding
-        self.scalar = 1.0
+        self.auto_scale = auto_scale
+        self.embed_bm(**self.embed_kwargs)
 
     def to_networkx_graph(self):
         self._networkx_graph = self.sampler.to_networkx_graph()
         return self._networkx_graph
 
-    def embed_bqm(self, bqm=None, auto_scale=False, **embed_kwargs):
-        if bqm is None:
-            bqm = self.to_ising().copy()
+    def embed_bm(self, flip_variables=[], **embed_kwargs):
+
+        bqm = self.to_ising().copy()
+        for v in flip_variables:
+            bqm.flip_variable(v)
 
         embedding = self.embedding
-
         target_bqm = embedding.embed_bqm(bqm,**embed_kwargs)
         ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
         scale_kwargs = {'ignored_interactions':ignoring}
-        if auto_scale:
-            # Same as target auto_scale but retains scalar
+
+        if self.auto_scale:
+            # Same function as sampler's auto_scale but retains scalar
             scale_kwargs.update({'bias_range':self.sampler.properties['h_range'],
                                'quadratic_range':self.sampler.properties['j_range']})
             self.scalar = target_bqm.normalize(**scale_kwargs)
         else:
             target_bqm.scale(1.0/float(self.beta),**scale_kwargs)
+
         return target_bqm
 
-    def sample_rbm(self, embed_kwargs={}, unembed_kwargs={}, **sample_kwargs):
-        bqm = self.to_ising().copy()
-        embedding = self.embedding
+    def sample_bm(self, embed_kwargs={}, unembed_kwargs={}, **sample_kwargs):
 
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
         sample_kwargs = {**self.sample_kwargs,**sample_kwargs}
         unembed_kwargs = {**self.unembed_kwargs,**unembed_kwargs}
 
-        responses = []
-        flipped_bqm = bqm.copy()
-        transform = {v: False for v in bqm.variables}
-        num_spin_reversal_transforms = 4
-
         num_reads = sample_kwargs.pop('num_reads',100)
-        auto_scale = sample_kwargs.pop('auto_scale',False)
+        auto_scale = sample_kwargs.pop('auto_scale',self.auto_scale)
         num_spinrevs = sample_kwargs.pop('num_spin_reversal_transforms',0)
 
-        if num_spinrevs>1:
+        if num_spinrevs > 1:
             reads_per_transform = num_reads//num_spinrevs
             iter_num_reads = [reads_per_transform]*(num_spinrevs-1)
             iter_num_reads += [reads_per_transform+(num_reads%num_spinrevs)]
         else:
             iter_num_reads = [num_reads]
 
+        transform=[]
+        responses = []
         for num_reads in iter_num_reads:
             # Don't flip if num_spin_reversal_transforms is 0
-            if num_spinrevs>0:
-                for v in list(bqm.variables):
-                    if random() > .5:
-                        transform[v] = not transform[v]
-                        flipped_bqm.flip_variable(v)
+            if num_spinrevs > 0:
+                transform = [v for v in self.ising if random() > .5]
 
-            target_bqm = self.embed_bqm(flipped_bqm,auto_scale,**embed_kwargs)
+            target_bqm = self.embed_bm(flip_variables=transform,**embed_kwargs)
             target_response = self.sampler.sample(target_bqm,auto_scale=False,
                                           num_reads=num_reads,answer_mode='raw',
                                           num_spin_reversal_transforms=0,
@@ -407,12 +394,8 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
             target_response.change_vartype('BINARY',inplace=True)
 
             flipped_response = self.unembed_sampleset(target_response,**unembed_kwargs)
-
-            tf_idxs = [flipped_response.variables.index(v)
-                       for v, flip in transform.items() if flip]
-
+            tf_idxs = [flipped_response.variables.index(v) for v in transform]
             flipped_response.record.sample[:, tf_idxs] = 1 - flipped_response.record.sample[:, tf_idxs]
-
             responses.append(flipped_response)
 
         return dimod.sampleset.concatenate(responses)
@@ -426,7 +409,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
 
         kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
-        self.sampleset = self.sample_rbm(embed_kwargs,unembed_kwargs,**kwargs)
+        self.sampleset = self.sample_bm(embed_kwargs,unembed_kwargs,**kwargs)
 
 
         samples = self.sampleset.record.sample.copy()
@@ -464,12 +447,6 @@ class AdachiQASampler(QASampler):
         if topology_type == 'pegasus':
             self.template_graph = dnx.pegasus_graph(shape[0])
             if embedding is None:
-                # TODO: Use option with chain_imbalance=None
-                # helper = minorminer.utils.pegasus._pegasus_fragment_helper
-                # _embedder, _converter = helper(16, self.template_graph)
-                # _left,_right = _embedder.tightestNativeBiClique(model.V,model.H,chain_imbalance=None)
-                # left,right = _converter(range(model.V),_left),_converter(range(model.H),_right)
-                # embedding = {**left,**{k+model.V:v for k,v in right.items()}}
                 cache = minorminer.busclique.busgraph_cache(self.template_graph)
                 embedding = cache.find_biclique_embedding(model.V,model.H)
         elif topology_type == 'chimera':
@@ -508,7 +485,7 @@ class AdachiQASampler(QASampler):
                 raise RuntimeError(f"No subgraphs were found for chain: {x}")
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
-    def embed_bqm(self, bqm, **embed_kwargs):
+    def embed_bm(self, bqm, **embed_kwargs):
         embedding = self.embedding
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
 

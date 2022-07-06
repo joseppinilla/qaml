@@ -249,7 +249,7 @@ plt.savefig("quantum_weights.pdf")
 ########################### Check parameter range ##############################
 h_range = qa_sampler.sampler.properties['h_range']
 J_range = qa_sampler.sampler.properties['extended_j_range']
-target_ising = qa_sampler.embed_bqm(qa_sampler.to_ising(),chain_strength=0.8)
+target_ising = qa_sampler.embed_bqm(chain_strength=0.8)
 linear = target_ising.linear.values()
 quad = target_ising.quadratic.values()
 print(f"Linear range [{min(linear):.2} <> {max(linear):.2}] @ device={h_range}")
