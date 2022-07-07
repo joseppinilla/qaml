@@ -20,7 +20,7 @@ def distance_from_gibbs(model, samples, beta_range=None):
 
     solver = qaml.sampler.ExactNetworkSampler(model)
     sampleset = torch.cat(samples,1).tolist()
-    E_samples = solver.to_qubo().energies(sampleset)
+    E_samples = solver.to_bqm().energies(sampleset)
     unique, counts = np.unique(E_samples, return_counts=True)
     EP_samples = dict(zip(unique, counts/len(E_samples)))
 
