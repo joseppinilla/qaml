@@ -132,14 +132,34 @@ class BinaryQuadraticModelSampler(NetworkSampler):
 
     def __init__(self, model, beta=1.0):
         super(BinaryQuadraticModelSampler, self).__init__(model,beta)
+        _ = self.to_bqm()
 
-    @torch.no_grad()
+    def to_bqm(self):
+        """Obtain the Binary Quadratic Model of the network to be sampled, from
+        the full matrix representation. Edges with 0.0 biases are ignored."""
+        model = self.model
+        # BQM(M,'SPIN') adds linear biases to offset instead
+        # self._bqm = dimod.BinaryQuadraticModel(model.matrix,model.vartype)
+        self._bqm = dimod.BinaryQuadraticModel(model.vartype)
+        quadratic = model.matrix
+        diag = np.diagonal(quadratic)
+        self._bqm.add_linear_from_array(diag)
+        # zero out the diagonal
+        new_quadratic = np.array(quadratic, copy=True)
+        np.fill_diagonal(new_quadratic, 0)
+        self._bqm.add_quadratic_from_dense(new_quadratic)
+
+        return self._bqm
+
+    @property
+    def bqm(self):
+        if self._bqm is None:
+            return self.to_bqm()
+        else:
+            return self._bqm
+
     def to_qubo(self):
-        """Obtain the Quadractic Unconstrained Binary Optimization proble
-        representation of the model to be sampled. Use the full matrix
-        representation of the model. Edges with 0.0 bias are ignored."""
-        M = self.model.matrix
-        self._qubo = dimod.BinaryQuadraticModel.from_numpy_matrix(M)
+        self._qubo = self.to_bqm().binary
         return self._qubo
 
     @property
@@ -150,10 +170,7 @@ class BinaryQuadraticModelSampler(NetworkSampler):
             return self._qubo
 
     def to_ising(self):
-        """When converting a Boltzmann Machine (BM) model to Ising, first
-        formulate as Quadratic Unconstrained Binary Optimization (QUBO) and then
-        transform to Ising."""
-        self._ising = self.to_qubo().change_vartype('SPIN',inplace=False)
+        self._ising = self.to_bqm().spin
         return self._ising
 
     @property
@@ -184,7 +201,7 @@ class SimulatedAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         self.sampler = dimod.SimulatedAnnealingSampler(**kwargs)
 
     def forward(self, num_reads=100, **kwargs):
-        bqm = self.to_qubo()
+        bqm = self.to_bqm()
         bqm.scale(float(self.beta))
         sa_kwargs = {**self.sa_kwargs,**kwargs}
         sampleset = self.sampler.sample(bqm,num_reads=num_reads,**sa_kwargs)
@@ -206,7 +223,7 @@ class ExactNetworkSampler(BinaryQuadraticModelSampler):
     @torch.no_grad()
     def get_energies(self, **ex_kwargs):
         if self.sampleset is None:
-            bqm = self.to_qubo()
+            bqm = self.to_bqm()
             solutions = self.sampler.sample(bqm,**ex_kwargs)
             self.sampleset = solutions
         else:
@@ -224,7 +241,7 @@ class ExactNetworkSampler(BinaryQuadraticModelSampler):
 
     def forward(self, num_reads=None, **ex_kwargs):
         beta = self.beta
-        bqm = self.to_qubo()
+        bqm = self.to_bqm()
 
         solutions = self.sampler.sample(bqm,**ex_kwargs)
         energies = solutions.record['energy']
@@ -277,7 +294,7 @@ class ExactEmbeddedNetworkSampler(BinaryQuadraticModelSampler):
 
     def forward(self, num_reads=None, **ex_kwargs):
         beta = self.beta
-        bqm = self.to_qubo()
+        bqm = self.to_bqm()
 
         solutions = self.sampler.sample(bqm,**ex_kwargs)
         energies = solutions.record['energy']
@@ -315,7 +332,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
                  chain_imbalance=None, failover=False, retry_interval=-1,
                  **config):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
-        bqm = self.to_qubo()
+        bqm = self.to_bqm()
         self.sampler = dwave.system.DWaveSampler(failover,retry_interval,**config)
         target = self.networkx_graph
         if embedding is None:
@@ -383,7 +400,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         for num_reads in iter_num_reads:
             # Don't flip if num_spin_reversal_transforms is 0
             if num_spinrevs > 0:
-                transform = [v for v in self.ising if random() > .5]
+                transform = [v for v in self.bqm if random() > .5]
 
             target_bqm = self.embed_bm(flip_variables=transform,**embed_kwargs)
             target_response = self.sampler.sample(target_bqm,auto_scale=False,
@@ -391,11 +408,15 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
                                           num_spin_reversal_transforms=0,
                                           **sample_kwargs)
             target_response.resolve()
-            target_response.change_vartype('BINARY',inplace=True)
+            if self.model.vartype is dimod.BINARY:
+                target_response.change_vartype('BINARY',inplace=True)
 
             flipped_response = self.unembed_sampleset(target_response,**unembed_kwargs)
             tf_idxs = [flipped_response.variables.index(v) for v in transform]
-            flipped_response.record.sample[:, tf_idxs] = 1 - flipped_response.record.sample[:, tf_idxs]
+            if self.model.vartype is dimod.BINARY:
+                flipped_response.record.sample[:, tf_idxs] = 1 - flipped_response.record.sample[:, tf_idxs]
+            elif self.model.vartype is dimod.SPIN:
+                flipped_response.record.sample[:, tf_idxs] = -flipped_response.record.sample[:, tf_idxs]
             responses.append(flipped_response)
 
         return dimod.sampleset.concatenate(responses)

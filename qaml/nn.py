@@ -12,10 +12,11 @@ class EnergyBasedModel(torch.nn.Module):
     V : int # Visible nodes
     H : int # Hidden nodes
 
-    def __init__(self, V, H):
+    def __init__(self, V, H, vartype=dimod.BINARY):
         super(EnergyBasedModel, self).__init__()
         self.V = V
         self.H = H
+        self.vartype = vartype
 
     @property
     @torch.no_grad()
@@ -34,6 +35,16 @@ class EnergyBasedModel(torch.nn.Module):
             hi,hj = np.triu_indices(H,1)
             A[V+hi,V+hj] = self.hh
         return A.detach().numpy()
+
+    def change_vartype(self, vartype):
+        if vartype is dimod.SPIN and self.vartype is dimod.BINARY:
+            self.vartype = vartype
+            raise NotImplementedError("Method not implemented.")
+        elif vartype is dimod.BINARY and self.vartype is dimod.SPIN:
+            self.vartype = vartype
+            raise NotImplementedError("Method not implemented.")
+        else:
+            raise ValueError(f"No match between {vartype} to {self.vartype}")
 
     def energy(self, visible, hidden):
         # TODO using matrix
@@ -60,10 +71,8 @@ class BoltzmannMachine(EnergyBasedModel):
     V : int # Visible nodes
     H : int # Hidden nodes
 
-    def __init__(self, V, H):
-        super(BoltzmannMachine, self).__init__(V,H)
-        self.V = V
-        self.H = H
+    def __init__(self, V, H, vartype=dimod.BINARY):
+        super(BoltzmannMachine, self).__init__(V,H,vartype)
         # Visible linear bias
         self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
         # Hidden linear bias
@@ -89,10 +98,8 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
     V : int # Visible nodes
     H : int # Hidden nodes
 
-    def __init__(self, V, H):
-        super(RestrictedBoltzmannMachine, self).__init__(V,H)
-        self.V = V
-        self.H = H
+    def __init__(self, V, H, vartype=dimod.BINARY):
+        super(RestrictedBoltzmannMachine, self).__init__(V,H,vartype)
         # Visible linear bias
         self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
         # Hidden linear bias
@@ -106,11 +113,17 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
 
     def generate(self, hidden, scale=1.0):
         """Sample from visible. P(V) = σ(HW^T + b)"""
-        return torch.sigmoid(F.linear(hidden, self.W.T, self.b)*scale)
+        if self.vartype is dimod.BINARY:
+            return torch.sigmoid(F.linear(hidden, self.W.T, self.b)*scale)
+        elif self.vartype is dimod.SPIN:
+            return torch.sigmoid(2*F.linear(hidden, self.W.T, self.b)*scale)
 
     def forward(self, visible, scale=1.0):
         """Sample from hidden. P(H) = σ(VW^T + c)"""
-        return torch.sigmoid(F.linear(visible, self.W, self.c)*scale)
+        if self.vartype is dimod.BINARY:
+            return torch.sigmoid(F.linear(visible, self.W, self.c)*scale)
+        elif self.vartype is dimod.SPIN:
+            return torch.sigmoid(2*F.linear(visible, self.W, self.c)*scale)
 
     @torch.no_grad()
     def energy(self, visible, hidden, scale=1.0):
@@ -150,7 +163,10 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
     @torch.no_grad()
     def partition_function(self, scale=1.0):
         """Compute the partition function"""
-        sequence = torch.tensor([0.,1.],requires_grad=False).repeat(self.H,1)
+        if self.vartype is dimod.BINARY:
+            sequence = torch.tensor([0.,1.],requires_grad=False).repeat(self.H,1)
+        elif self.vartype is dimod.SPIN:
+            sequence = torch.tensor([-1.,1.],requires_grad=False).repeat(self.H,1)
         h_iter = torch.cartesian_prod(*sequence)
         first_term = torch.matmul(scale*self.c.T,h_iter.T).exp()
         second_term = (1+(scale*F.linear(h_iter,self.W.T,self.b)).exp()).prod(1)
@@ -162,7 +178,10 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
         Warning: This function computes the partition function.
         """
         # Model
-        sequence = torch.tensor([0.,1.],requires_grad=False).repeat(self.H,1)
+        if self.vartype is dimod.BINARY:
+            sequence = torch.tensor([0.,1.],requires_grad=False).repeat(self.H,1)
+        elif self.vartype is dimod.SPIN:
+            sequence = torch.tensor([-1.,1.],requires_grad=False).repeat(self.H,1)
         h_iter = torch.cartesian_prod(*sequence)
         first_term = torch.matmul(scale*self.c.T,h_iter.T).exp()
         second_term = (1+(scale*F.linear(h_iter,self.W.T,self.b)).exp()).prod(1)
@@ -180,10 +199,8 @@ class LimitedBoltzmannMachine(EnergyBasedModel):
     """ TODO: A Boltzmann Machine with added connections between visible-hidden
     and hidden-hidden units.
     """
-    def __init__(self,V,H):
-        super(LimitedBoltzmannMachine, self).__init__(V,H)
-        self.V = V
-        self.H = H
+    def __init__(self, V, H, vartype=dimod.BINARY):
+        super(LimitedBoltzmannMachine, self).__init__(V,H,vartype)
         # Visible linear bias
         self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
         # Hidden linear bias
