@@ -16,7 +16,7 @@ class EnergyBasedModel(torch.nn.Module):
         super(EnergyBasedModel, self).__init__()
         self.V = V
         self.H = H
-        self.vartype = vartype
+        self.vartype = dimod.as_vartype(vartype)
 
     @property
     @torch.no_grad()
