@@ -6,6 +6,94 @@ import torchvision
 
 import numpy as np
 
+class PhaseState(torch.utils.data.Dataset):
+    """ Synthetic data points that represent the phase of a 1D state at N
+        spatial points. The '0' phase is accumulated to the left, and the '1'
+        phase is accumulated to the right with at most 1 boundary. Used in [1].
+        [1] Srivastava, S., & Sundararaghavan, V. (2020). Machine learning in
+            quantum computers via general Boltzmann Machines: Generative and
+            Discriminative training through annealing.
+            https://doi.org/10.48550/arxiv.2002.00792
+
+        Example:
+        >>> PhaseState.generate(3)
+        >>> (array([[1., 1., 1.],
+                    [0., 1., 1.],
+                    [0., 0., 1.],
+                    [0., 0., 0.]]),
+             array([0, 1, 2, 3]))
+        >>> PhaseState.generate(3,labeled=True)
+        >>> (array([[1., 1., 1.],
+                    [0., 1., 1.],
+                    [0., 0., 1.],
+                    [0., 0., 0.],
+                    [0., 1., 0.],
+                    [1., 1., 0.],
+                    [1., 0., 1.],
+                    [1., 0., 0.]]),
+             array([0., 0., 0., 0., 1., 1., 1., 1.]))
+
+    Args:
+        N (int): Number of spatial points.
+
+        labeled (bool): If labeled, 1 boundary phase states have label 1., and
+            random states have 0. If false, labels simply index each data point
+            [0,N].
+
+    """
+
+    def __init__(self, N, labeled=False, transform=None, target_transform=None):
+        self.transform = transform
+        self.labeled = labeled
+        self.target_transform = target_transform
+        self.data,self.targets = self.generate(N,labeled)
+
+
+    def __getitem__(self, index):
+        if torch.is_tensor(index):
+            index = index.tolist()
+
+        data, target = self.data[index], self.targets[index]
+
+        if self.transform is not None:
+            data = self.transform(data)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return data, target
+
+    @classmethod
+    def generate(cls, N, labeled=False):
+        if not labeled:
+            return np.triu(np.ones((N+1,N))), np.arange(N+1)
+        else:
+            phase = np.triu(np.ones((N+1,N)))
+
+            # Random data points
+            int_set = set(phase.dot(2**np.arange(phase[0].size)[::-1]))
+            R = min(N*3-1, ((2**N)//2))
+            labels = np.concatenate((np.zeros(N+1),np.ones(R)))
+
+            while i:=0 < R:
+                rand_set = []
+                while R>0:
+                    rand = np.random.randint(1,2**N-1)
+                    if rand in int_set: continue
+                    if rand in rand_set: continue
+                    else:
+                        rand_set.append(rand)
+                        R-=1
+            def int2binarray(x,width):
+                return np.asarray(list(np.binary_repr(x).zfill(width)),int)
+
+            random = [int2binarray(x,N) for x in rand_set]
+            data = np.concatenate((phase,random))
+
+
+            return data, labels
+
+
 class BAS(torch.utils.data.Dataset):
     """ Bars And Stripes (BAS) Synthetic Dataset
 
