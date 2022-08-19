@@ -21,7 +21,7 @@ class NetworkSampler(torch.nn.Module):
         beta (float, optional): Inverse temperature for the distribution.
     """
 
-    beta : float # Inverse-temperature to match sampler
+    beta : torch.Tensor # Inverse-temperature to match sampler
 
     def __init__(self, model, beta=1.0):
         super(NetworkSampler, self).__init__()
@@ -33,53 +33,32 @@ class NetworkSampler(torch.nn.Module):
         hidden_unknown = torch.Tensor([float('NaN')]*model.H)
         self.prob_h = torch.nn.Parameter(hidden_unknown, requires_grad=False)
 
-        if torch.is_tensor(beta):
-            self.register_buffer('beta', beta)
-        else:
-            self.beta = beta
+        self.beta = torch.as_tensor(beta)
+        # self.register_buffer('beta',beta)
 
-    def sample_visible(self):
+    def sample_v(self, prob_v=None):
+        if prob_v is None:
+            prob_v = self.prob_v.clone()
         try:
-            return self.prob_v.bernoulli()
+            if self.model.vartype is dimod.BINARY:
+                return torch.ge(prob_v,torch.rand(prob_v.shape)).to(prob_v.dtype)
+            elif self.model.vartype is dimod.SPIN:
+                return (2.0*torch.ge(prob_v,torch.rand(prob_v.shape))-1.0)
         except RuntimeError as e:
             warnings.warn(f"Invalid probability vector: {self.prob_v}")
             return torch.zeros_like(self.prob_v)
 
-    def sample_hidden(self):
+    def sample_h(self, prob_h=None):
+        if prob_h is None:
+            prob_h = self.prob_h.clone()
         try:
-            return self.prob_h.bernoulli()
+            if self.model.vartype is dimod.BINARY:
+                return torch.ge(prob_h,torch.rand(prob_h.shape)).to(prob_h.dtype)
+            elif self.model.vartype is dimod.SPIN:
+                return (2.0*torch.ge(prob_h,torch.rand(prob_h.shape))-1.0)
         except RuntimeError as e:
             warnings.warn(f"Invalid probability vector: {self.prob_h}")
             return torch.zeros_like(self.prob_h)
-
-class PersistentGibbsNetworkSampler(NetworkSampler):
-    """ Sampler for Persistent Constrastive Divergence training with k steps.
-
-        Args:
-            model (torch.nn.Module): PyTorch `Module` with `forward` method.
-
-            num_chains (int): PCD keeps N chains at all times. This number must
-                match the batch size.
-
-    """
-    def __init__(self, model, num_chains, beta=1.0):
-        if 'Restricted' not in repr(model):
-            raise RuntimeError("Not Supported")
-        super(PersistentGibbsNetworkSampler, self).__init__(model,beta)
-        self.prob_v.data = torch.rand(num_chains,model.V)
-
-    def forward(self, num_samples, k=1, init=None):
-        beta = self.beta
-        prob_vk = self.prob_v.clone() if init is None else init.clone()
-        prob_hk = self.model.forward(prob_vk.bernoulli(),scale=beta)
-
-        for _ in range(k):
-            prob_vk.data = self.model.generate(prob_hk.bernoulli(),scale=beta)
-            prob_hk.data = self.model.forward(prob_vk.bernoulli(),scale=beta)
-
-        self.prob_v.data = prob_vk.data
-        self.prob_h.data = prob_hk.data
-        return prob_vk[:num_samples], prob_hk[:num_samples]
 
 class GibbsNetworkSampler(NetworkSampler):
 
@@ -92,34 +71,59 @@ class GibbsNetworkSampler(NetworkSampler):
     def reconstruct(self, input_data, k=1, mask=None):
         beta = self.beta
 
-        if mask is None:
-            mask = torch.ones_like(input_data)
-        clamp = torch.mul(input_data,mask)
+        if mask is None: mask = torch.ones_like(self.prob_v)
 
-        prob_vk = clamp.clone().masked_fill_((mask==0),0.5)
-        prob_hk = self.model.forward(prob_vk.bernoulli(),scale=beta)
+        # Fill in with 0.5 if BINARY(0,1) or 0.0 if SPIN(-1,+1)
+        mask_value = sum(self.model.vartype.value)/2.0
+        clamp = torch.mul(input_data.detach().clone(),mask)
+        prob_v = clamp.clone().masked_fill_((mask==0),mask_value)
+        prob_h = self.model.forward(self.sample_v(prob_v),scale=beta)
         for _ in range(k):
-            prob_vk.data = self.model.generate(prob_hk,scale=beta).data
-            masked = clamp + (mask==0)*prob_vk.data
-            prob_hk.data = self.model.forward(masked,scale=beta).data
+            recon = self.model.generate(self.sample_h(prob_h),scale=beta)
+            prob_v.data = clamp + (mask==0)*recon
+            prob_h.data = self.model.forward(self.sample_v(prob_v),scale=beta)
 
-        self.prob_v.data = masked.data
-        self.prob_h.data = prob_hk.data
-        return masked, prob_hk
+        return prob_v.clone(), prob_h.clone()
 
     @torch.no_grad()
     def forward(self, v0, k=1):
         beta = self.beta
-        prob_vk = v0.clone()
-        prob_hk = self.model.forward(prob_vk.bernoulli(),scale=beta)
+        self.prob_v.data = v0.clone()
+        self.prob_h.data = self.model.forward(self.sample_v(),scale=beta)
 
         for _ in range(k):
-            prob_vk.data = self.model.generate(prob_hk.bernoulli(),scale=beta)
-            prob_hk.data = self.model.forward(prob_vk.bernoulli(),scale=beta)
+            self.prob_v.data = self.model.generate(self.sample_h(),scale=beta)
+            self.prob_h.data = self.model.forward(self.sample_v(),scale=beta)
 
-        self.prob_v.data = prob_vk.data
-        self.prob_h.data = prob_hk.data
-        return prob_vk, prob_hk
+        return self.prob_v.clone(), self.prob_h.clone()
+
+class PersistentGibbsNetworkSampler(GibbsNetworkSampler):
+    """ Sampler for Persistent Constrastive Divergence training with k steps.
+
+        Args:
+            model (torch.nn.Module): PyTorch `Module` with `forward` method.
+
+            num_chains (int): PCD keeps N chains at all times. This number must
+                match the batch size.
+
+    """
+    def __init__(self, model, num_chains, input_databeta=1.0):
+        if 'Restricted' not in repr(model):
+            raise RuntimeError("Not Supported")
+        super(PersistentGibbsNetworkSampler, self).__init__(model,beta)
+        self.prob_v.data = torch.rand(num_chains,model.V)
+
+    @torch.no_grad()
+    def forward(self, k=1):
+        beta = self.beta
+        self.prob_h.data = self.model.forward(self.sample_v(),scale=beta)
+
+        for _ in range(k):
+            self.prob_v.data = self.model.generate(self.sample_h(),scale=beta)
+            self.prob_h.data = self.model.forward(self.sample_v(),scale=beta)
+
+        return self.prob_v, self.prob_h
+
 
 """ The next samplers formulate the model as a Binary Quadratic Model (BQM) """
 class BinaryQuadraticModelSampler(NetworkSampler):
@@ -138,13 +142,16 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         """Obtain the Binary Quadratic Model of the network to be sampled, from
         the full matrix representation. Edges with 0.0 biases are ignored."""
         model = self.model
-        # BQM(M,'SPIN') adds linear biases to offset instead
-        # self._bqm = dimod.BinaryQuadraticModel(model.matrix,model.vartype)
+        # This could also be done using:
+        # >>> self._bqm = dimod.BinaryQuadraticModel(model.matrix,model.vartype)
+        # but BQM(M,'SPIN') adds linear biases to offset, instead of the diagonal
+
+        # Fill in the linear biases using the diagonal
         self._bqm = dimod.BinaryQuadraticModel(model.vartype)
         quadratic = model.matrix
         diag = np.diagonal(quadratic)
         self._bqm.add_linear_from_array(diag)
-        # zero out the diagonal
+        # Zero out the diagonal, and use the rest of the matrix to fill up BQM
         new_quadratic = np.array(quadratic, copy=True)
         np.fill_diagonal(new_quadratic, 0)
         self._bqm.add_quadratic_from_dense(new_quadratic)
