@@ -114,16 +114,16 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
     def generate(self, hidden, scale=1.0):
         """Sample from visible. P(V) = σ(HW^T + b)"""
         if self.vartype is dimod.BINARY:
-            return torch.sigmoid(F.linear(hidden, self.W.T, self.b)*scale)
+            return torch.sigmoid(F.linear(hidden,self.W.T,self.b)*scale)
         elif self.vartype is dimod.SPIN:
-            return torch.sigmoid(2*F.linear(hidden, self.W.T, self.b)*scale)
+            return torch.sigmoid(2.0*F.linear(hidden,self.W.T,self.b)*scale)
 
     def forward(self, visible, scale=1.0):
         """Sample from hidden. P(H) = σ(VW^T + c)"""
         if self.vartype is dimod.BINARY:
-            return torch.sigmoid(F.linear(visible, self.W, self.c)*scale)
+            return torch.sigmoid(F.linear(visible,self.W,self.c)*scale)
         elif self.vartype is dimod.SPIN:
-            return torch.sigmoid(2*F.linear(visible, self.W, self.c)*scale)
+            return torch.sigmoid(2.0*F.linear(visible,self.W,self.c)*scale)
 
     @torch.no_grad()
     def energy(self, visible, hidden, scale=1.0):
@@ -134,7 +134,7 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
             hidden (Tensor): Hidden node vector of size RBM.H
         """
         # Visible and Hidden contributions (D,V)·(V,1) + (D,H)·(H,1) -> (D,1)
-        linear = torch.matmul(visible, self.b.T) + torch.matmul(hidden, self.c.T)
+        linear = torch.matmul(visible,self.b.T) + torch.matmul(hidden,self.c.T)
         # Quadratic contributions (D,V)·(V,H) -> (D,H)x(1,H) -> (D,H)
         quadratic = visible.matmul(self.W.T).mul(hidden)
         # sum_j((D,H)) -> (D,1)
