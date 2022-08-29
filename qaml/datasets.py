@@ -48,7 +48,9 @@ class PhaseState(torch.utils.data.Dataset):
         self.target_transform = target_transform
         self.data,self.targets = self.generate(N,labeled)
 
-
+    def __len__(self):
+        return len(self.data)
+        
     def __getitem__(self, index):
         if torch.is_tensor(index):
             index = index.tolist()

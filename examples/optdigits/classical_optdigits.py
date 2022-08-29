@@ -29,13 +29,12 @@ momentum = 0.5
 # %%
 #################################### Input Data ################################
 train_dataset = qaml.datasets.OptDigits(root='./data/', train=True,
-                                     transform=torch_transforms.Compose([
-                                     torch_transforms.ToTensor(),
-                                     lambda x:(x>0.5).to(x.dtype)]), #Binarize
-                                     target_transform=torch_transforms.Compose([
-                                     lambda x:torch.LongTensor([x.astype(int)]),
-                                     lambda x:F.one_hot(x-1,len(SUBCLASSES))]),
-                                     download=True)
+                              transform=torch_transforms.Compose([
+                              torch_transforms.ToTensor(),torch.round]),
+                              target_transform=torch_transforms.Compose([
+                              lambda x:torch.LongTensor([int(x)]),
+                              lambda x:F.one_hot(x-1,len(SUBCLASSES))]),
+                              download=True)
 
 train_idx = [i for i,y in enumerate(train_dataset.targets) if y in SUBCLASSES]
 sampler = torch.utils.data.SubsetRandomSampler(train_idx)
@@ -51,13 +50,12 @@ for ax,(img,label) in zip(axs.flat,subdataset):
 plt.tight_layout()
 
 test_dataset = qaml.datasets.OptDigits(root='./data/', train=False,
-                                    transform=torch_transforms.Compose([
-                                    torch_transforms.ToTensor(),
-                                    lambda x:(x>0.5).to(x.dtype)]), #Binarize
-                                    target_transform=torch_transforms.Compose([
-                                    lambda x:torch.LongTensor([x.astype(int)]),
-                                    lambda x:F.one_hot(x-1,len(SUBCLASSES))]),
-                                    download=True)
+                             transform=torch_transforms.Compose([
+                             torch_transforms.ToTensor(),torch.round]),
+                             target_transform=torch_transforms.Compose([
+                             lambda x:torch.LongTensor([int(x)]),
+                             lambda x:F.one_hot(x-1,len(SUBCLASSES))]),
+                             download=True)
 
 test_idx = [i for i,y in enumerate(test_dataset.targets) if y in SUBCLASSES]
 sampler = torch.utils.data.SubsetRandomSampler(test_idx)
@@ -71,11 +69,6 @@ HIDDEN_SIZE = 16
 # Specify model with dimensions
 rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE)
 
-# Initialize biases
-_ = torch.nn.init.uniform_(rbm.c,-0.5,0.5)
-_ = torch.nn.init.zeros_(rbm.c)
-_ = torch.nn.init.uniform_(rbm.W,-0.5,0.5)
-
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(),
                             lr=learning_rate,
@@ -85,7 +78,7 @@ optimizer = torch.optim.SGD(rbm.parameters(),
 # Set up training mechanisms
 beta = 1.0
 gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=beta)
-CD = qaml.autograd.SampleBasedConstrastiveDivergence()
+CD = qaml.autograd.ConstrastiveDivergence
 
 # %%
 ################################## Model Training ##############################
