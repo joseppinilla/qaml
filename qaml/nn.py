@@ -84,7 +84,6 @@ class BoltzmannMachine(EnergyBasedModel):
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
 
-
 BM = BoltzmannMachine
 
 class RestrictedBoltzmannMachine(EnergyBasedModel):
@@ -196,7 +195,7 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
 RBM = RestrictedBoltzmannMachine
 
 class LimitedBoltzmannMachine(EnergyBasedModel):
-    """ TODO: A Boltzmann Machine with added connections between visible-hidden
+    """ A Boltzmann Machine with added connections between visible-hidden
     and hidden-hidden units.
     """
     def __init__(self, V, H, vartype=dimod.BINARY):
@@ -211,5 +210,12 @@ class LimitedBoltzmannMachine(EnergyBasedModel):
         self.hh = torch.nn.Parameter(torch.randn(H*(H-1)//2)*0.1,requires_grad=True)
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
+
+    def generate(self, hidden, scale=1.0):
+        """Sample from visible. P(V) = σ(HW^T + b)"""
+        if self.vartype is dimod.BINARY:
+            return torch.sigmoid(F.linear(hidden,self.W.T,self.b)*scale)
+        elif self.vartype is dimod.SPIN:
+            return torch.sigmoid(2.0*F.linear(hidden,self.W.T,self.b)*scale)
 
 LBM = LimitedBoltzmannMachine
