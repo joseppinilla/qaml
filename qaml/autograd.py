@@ -56,7 +56,7 @@ class GeneralBoltzmannMachine(torch.autograd.Function):
         i,j = np.triu_indices(V,1)
         pos_vv = (samples_v0[:,i]*samples_v0[:,j])/D
         neg_vv = (samples_vk[:,i]*samples_vk[:,j])/S
-        vv_grad = pos_vv - neg_vv
+        vv_grad = -grad_output*(pos_vv - neg_vv)
 
         #   for i = 1,...,n, j = 1,...,m do
         #     \Delta hh_{ij} += p(H_i=1|v^{0})*p(H_j=1|v^{0})
@@ -64,7 +64,7 @@ class GeneralBoltzmannMachine(torch.autograd.Function):
         i,j = np.triu_indices(H,1)
         pos_hh = (samples_h0[:,i]*samples_h0[:,j]).sum(dim=0)/D
         neg_hh = (samples_hk[:,i]*samples_hk[:,j]).sum(dim=0)/S
-        hh_grad = pos_hh - neg_hh
+        hh_grad = -grad_output*(pos_hh - neg_hh)
 
         #   for i = 1,...,n, j = 1,...,m do
         #     \Delta w_{ij} += p(H_i=1|v^{0})*v_j^{0} - p(H_i=1|v^{k})*v_j^{k}

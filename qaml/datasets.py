@@ -50,7 +50,7 @@ class PhaseState(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.data)
-        
+
     def __getitem__(self, index):
         if torch.is_tensor(index):
             index = index.tolist()
@@ -68,14 +68,15 @@ class PhaseState(torch.utils.data.Dataset):
     @classmethod
     def generate(cls, N, labeled=False):
         if not labeled:
-            return np.triu(np.ones((N+1,N))), np.arange(N+1)
+            return np.triu(np.ones((N+1,N),dtype='float32')), np.arange(N+1)
         else:
             phase = np.triu(np.ones((N+1,N)))
 
             # Random data points
             int_set = set(phase.dot(2**np.arange(phase[0].size)[::-1]))
             R = min(N*3-1, ((2**N)//2))
-            labels = np.concatenate((np.zeros(N+1),np.ones(R)))
+            labels = np.asarray(np.concatenate((np.zeros(N+1),np.ones(R))),
+                                dtype='float32')
 
             while i:=0 < R:
                 rand_set = []
@@ -90,8 +91,7 @@ class PhaseState(torch.utils.data.Dataset):
                 return np.asarray(list(np.binary_repr(x).zfill(width)),int)
 
             random = [int2binarray(x,N) for x in rand_set]
-            data = np.concatenate((phase,random))
-
+            data = np.asarray(np.concatenate((phase,random)),dtype='float32')
 
             return data, labels
 
