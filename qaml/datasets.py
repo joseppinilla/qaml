@@ -65,10 +65,24 @@ class PhaseState(torch.utils.data.Dataset):
 
         return data, target
 
+    def find(self, item):
+        if isinstance(item,torch.Tensor):
+            item = item.numpy()
+
+        if isinstance(item,np.ndarray):
+            iter = (i for i,d in enumerate(self.data) if np.array_equiv(d,item))
+        else:
+            raise RuntimeError("Item isn't `torch.Tensor` or `numpy.ndrray`")
+
+        return next(iter,None)
+
+    def __contains__(self, item):
+        return self.find(item) is not None
+
     @classmethod
     def generate(cls, N, labeled=False):
         if not labeled:
-            return np.triu(np.ones((N+1,N),dtype='float32')), np.arange(N+1)
+            return np.triu(np.ones((N+1,N),dtype='float64')), np.arange(N+1)
         else:
             phase = np.triu(np.ones((N+1,N)))
 
@@ -76,7 +90,7 @@ class PhaseState(torch.utils.data.Dataset):
             int_set = set(phase.dot(2**np.arange(phase[0].size)[::-1]))
             R = min(N*3-1, ((2**N)//2))
             labels = np.asarray(np.concatenate((np.zeros(N+1),np.ones(R))),
-                                dtype='float32')
+                                dtype='float64')
 
             while i:=0 < R:
                 rand_set = []
@@ -91,9 +105,22 @@ class PhaseState(torch.utils.data.Dataset):
                 return np.asarray(list(np.binary_repr(x).zfill(width)),int)
 
             random = [int2binarray(x,N) for x in rand_set]
-            data = np.asarray(np.concatenate((phase,random)),dtype='float32')
+            data = np.asarray(np.concatenate((phase,random)),dtype='float64')
 
             return data, labels
+
+    def score(self, samples):
+        total_samples = len(samples)
+        total_patterns = len(self)
+
+        sampled_patterns = [i for i in map(self.find,samples) if i is not None]
+        if not sampled_patterns: return 0.0,0.0,0.0
+
+        precision = len(sampled_patterns)/total_samples
+        recall = len(set(sampled_patterns))/total_patterns
+        score = 2.0*precision*recall/(precision+recall)
+
+        return precision, recall, score
 
 
 class BAS(torch.utils.data.Dataset):
@@ -157,7 +184,7 @@ class BAS(torch.utils.data.Dataset):
         return next(iter,None)
 
     def __contains__(self, item):
-        return bool(self.find(item))
+        return self.find(item) is not None
 
     def score(self, samples):
         """ Given a set of samples, compute the qBAS[1] sampling score:
