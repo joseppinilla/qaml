@@ -170,10 +170,9 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         _ = self.to_bqm()
 
     def to_bqm(self, clamp=None):
-        """Obtain the Binary Quadratic Model of the network to be sampled, from
+        """Obtain the Binary Quadratic Model of the network, from
         the full matrix representation. Edges with 0.0 biases are ignored."""
         model = self.model
-
 
         if clamp is None:
             quadratic = model.matrix
@@ -196,15 +195,18 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         # but BQM(M,'SPIN') adds linear biases to offset instead of the diagonal
 
         # Fill in the linear biases using the diagonal
-        self._bqm = dimod.BinaryQuadraticModel(model.vartype,offset=offset)
-        self._bqm.add_linear_from_array(diag)
+        self._bqm = dimod.BinaryQuadraticModel(model.vartype,offset=-offset)
+        self._bqm.add_linear_from_array(-diag)
         # Zero out the diagonal, and use the rest of the matrix to fill up BQM
         new_quadratic = np.array(quadratic, copy=True)
         np.fill_diagonal(new_quadratic, 0)
-        self._bqm.add_quadratic_from_dense(new_quadratic)
+        self._bqm.add_quadratic_from_dense(-new_quadratic)
+
+        if clamp is not None:
+            labels = {i:i+model.V for i in range(model.H)}
+            self._bqm.relabel_variables(labels,inplace=True)
 
         return self._bqm
-
 
     @property
     def bqm(self):
@@ -213,8 +215,8 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         else:
             return self._bqm
 
-    def to_qubo(self):
-        self._qubo = self.to_bqm().binary
+    def to_qubo(self, clamp=None):
+        self._qubo = self.to_bqm(clamp).binary
         return self._qubo
 
     @property
@@ -224,8 +226,8 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         else:
             return self._qubo
 
-    def to_ising(self):
-        self._ising = self.to_bqm().spin
+    def to_ising(self, clamp=None):
+        self._ising = self.to_bqm(clamp).spin
         return self._ising
 
     @property
@@ -414,9 +416,9 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         self._networkx_graph = self.sampler.to_networkx_graph()
         return self._networkx_graph
 
-    def embed_bm(self, flip_variables=[], **embed_kwargs):
+    def embed_bm(self, input_data=None, flip_variables=[], **embed_kwargs):
 
-        bqm = self.to_ising().copy()
+        bqm = self.to_ising(input_data).copy()
         for v in flip_variables:
             bqm.flip_variable(v)
 
@@ -435,7 +437,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
         return target_bqm
 
-    def sample_bm(self, embed_kwargs={}, unembed_kwargs={}, **sample_kwargs):
+    def sample_bm(self, input_data=None, embed_kwargs={}, unembed_kwargs={}, **sample_kwargs):
 
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
         sample_kwargs = {**self.sample_kwargs,**sample_kwargs}
@@ -454,21 +456,27 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
         transform=[]
         responses = []
+
+        bqm = self.to_bqm(input_data)
+
+        embedding = {v:chain for (v,chain) in self.embedding.items() if v in bqm.variables}
+
         for num_reads in iter_num_reads:
             # Don't flip if num_spin_reversal_transforms is 0
             if num_spinrevs > 0:
-                transform = [v for v in self.bqm if random() > .5]
+                transform = [v for v in bqm if random() > .5]
 
-            target_bqm = self.embed_bm(flip_variables=transform,**embed_kwargs)
+            target_bqm = self.embed_bm(input_data,flip_variables=transform,**embed_kwargs)
             target_response = self.sampler.sample(target_bqm,auto_scale=False,
                                           num_reads=num_reads,answer_mode='raw',
                                           num_spin_reversal_transforms=0,
                                           **sample_kwargs)
             target_response.resolve()
-            if self.model.vartype is dimod.BINARY:
-                target_response.change_vartype('BINARY',inplace=True)
+            target_response.change_vartype(self.model.vartype,inplace=True)
 
-            flipped_response = self.unembed_sampleset(target_response,**unembed_kwargs)
+            flipped_response = dwave.embedding.unembed_sampleset(target_response,
+                                                                 embedding,bqm,
+                                                                 **unembed_kwargs)
             tf_idxs = [flipped_response.variables.index(v) for v in transform]
             if self.model.vartype is dimod.BINARY:
                 flipped_response.record.sample[:, tf_idxs] = 1 - flipped_response.record.sample[:, tf_idxs]
@@ -476,25 +484,22 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
                 flipped_response.record.sample[:, tf_idxs] = -flipped_response.record.sample[:, tf_idxs]
             responses.append(flipped_response)
 
-        return dimod.sampleset.concatenate(responses)
+        self.sampleset = dimod.sampleset.concatenate(responses)
+        samples = self.sampleset.record.sample.copy()
+        return torch.tensor(samples,dtype=torch.float64)
 
-    def unembed_sampleset(self, response, **unembed_kwargs):
-        sampleset = dwave.embedding.unembed_sampleset(response,self.embedding,
-                                                     self.qubo,**unembed_kwargs)
-        return sampleset
 
-    def forward(self, num_reads, embed_kwargs={}, unembed_kwargs={}, **kwargs):
+    def forward(self, input_data=None, num_reads=100, embed_kwargs={},
+                unembed_kwargs={}, **kwargs):
 
 
         kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
-        self.sampleset = self.sample_bm(embed_kwargs,unembed_kwargs,**kwargs)
+        sampletensor = self.sample_bm(input_data,embed_kwargs,unembed_kwargs,**kwargs)
 
-
-        samples = self.sampleset.record.sample.copy()
-        sampletensor = torch.tensor(samples,dtype=torch.float32)
-        samples_v,samples_h = sampletensor.split([self.model.V,self.model.H],1)
-
-        return samples_v, samples_h
+        if input_data is None:
+            return sampletensor.split([self.model.V,self.model.H],1)
+        else:
+            return input_data.expand(num_reads,self.model.V), sampletensor
 
 QASampler = QuantumAnnealingNetworkSampler
 
