@@ -54,8 +54,8 @@ class GeneralBoltzmannMachine(torch.autograd.Function):
         #   for i = 1,...,n, j = 1,...,m do
         #     \Delta vv_{ij} += v_i^{0}*v_j^{0} - v_i^{k}*v_j^{k}
         i,j = np.triu_indices(V,1)
-        pos_vv = (samples_v0[:,i]*samples_v0[:,j])/D
-        neg_vv = (samples_vk[:,i]*samples_vk[:,j])/S
+        pos_vv = (samples_v0[:,i]*samples_v0[:,j]).sum(dim=0)/D
+        neg_vv = (samples_vk[:,i]*samples_vk[:,j]).sum(dim=0)/S
         vv_grad = -grad_output*(pos_vv - neg_vv)
 
         #   for i = 1,...,n, j = 1,...,m do
