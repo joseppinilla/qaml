@@ -223,8 +223,8 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         else:
             return self._ising
 
-    def to_networkx_graph(self):
-        self._networkx_graph = self._ising.to_networkx_graph()
+    def to_networkx_graph(self,**kwargs):
+        self._networkx_graph = self._ising.to_networkx_graph(**kwargs)
         return self._networkx_graph
 
     @property
@@ -369,15 +369,16 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
     unembed_kwargs = {"chain_break_fraction":False,
                       "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
 
-    scalar : float # Scaling factor to fit sampler's range
+    scalar = 1.0
     embedding = None
+    auto_scale = True
 
     def __init__(self, model, embedding=None, beta=1.0, auto_scale=True,
                  chain_imbalance=None, failover=False, retry_interval=-1,
-                 **config):
+                 **conf):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
         bqm = self.to_bqm()
-        self.sampler = dwave.system.DWaveSampler(failover,retry_interval,**config)
+        self.sampler = dwave.system.DWaveSampler(failover,retry_interval,**conf)
         target = self.networkx_graph
         if embedding is None:
             if 'Restricted' in repr(self.model):
@@ -395,6 +396,10 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
             embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
         self.embedding = embedding
         self.auto_scale = auto_scale
+
+    @classmethod
+    def get_sampler(cls, failover=False, retry_interval=-1, **conf):
+        return dwave.system.DWaveSampler(failover,retry_interval,**conf)
 
     def to_networkx_graph(self):
         self._networkx_graph = self.sampler.to_networkx_graph()

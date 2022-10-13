@@ -5,6 +5,7 @@ import itertools
 import torchvision
 
 import numpy as np
+import torch.nn.functional as F
 
 class PhaseState(torch.utils.data.Dataset):
     """ Synthetic data points that represent the phase of a 1D state at N
@@ -80,7 +81,8 @@ class PhaseState(torch.utils.data.Dataset):
         return self.find(item) is not None
 
     @classmethod
-    def generate(cls, N, labeled=False):
+    def generate(cls, N, labeled=False, random_seed=42):
+        rng = np.random.default_rng(random_seed)
         if not labeled:
             return np.triu(np.ones((N+1,N),dtype='float64')), np.arange(N+1)
         else:
@@ -95,7 +97,7 @@ class PhaseState(torch.utils.data.Dataset):
             while i:=0 < R:
                 rand_set = []
                 while R>0:
-                    rand = np.random.randint(1,2**N-1)
+                    rand = rng.integers(1,2**N-1)
                     if rand in int_set: continue
                     if rand in rand_set: continue
                     else:
@@ -147,12 +149,11 @@ class BAS(torch.utils.data.Dataset):
         >>>     ms = ax.matshow(img[i],vmin=0, vmax=1)
         >>>     ax.axis('off')
     """
+    classes = ['0 - All Zeros', '1 - Bars', '2 - Stripes', '3 - All Ones']
 
-    def __init__(self, rows, cols, embed_label=False,
-                 transform=None, target_transform=None):
-        self.data, self.targets = self.generate(rows,cols,embed_label)
+    def __init__(self, rows, cols, transform=None, target_transform=None):
+        self.data, self.targets = self.generate(rows,cols)
         self.transform = transform
-        self.embed_label = embed_label
         self.target_transform = target_transform
 
     def __len__(self):
@@ -220,7 +221,7 @@ class BAS(torch.utils.data.Dataset):
         return precision, recall, score
 
     @classmethod
-    def generate(cls, rows, cols, embed_label=False):
+    def generate(cls, rows, cols):
         """ Generate the full dataset of rows*cols Bars And Stripes (BAS).
         Args:
             cols (int): number of columns in the generated images
@@ -254,22 +255,12 @@ class BAS(torch.utils.data.Dataset):
                                          stripes[1:]), # ignore all zeros
                                          axis=0),dtype='float32')
 
-        if embed_label:
-            labels  = [(0,0)] # All zeros
-            labels += [(0,1)]*(2**cols-2) # Bars
-            labels += [(1,0)]*(2**rows-2) # Stripes
-            labels += [(1,1)] # All ones
-            targets = np.asarray(labels,dtype='float32')
-            data[:,-2,-1] = targets[:,0]
-            data[:,-1,-1] = targets[:,1]
-            return data, targets
-        else:
-            # Create labels synthetically
-            labels  = [0] # All zeros
-            labels += [1]*(2**cols-2) # Bars
-            labels += [2]*(2**rows-2) # Stripes
-            labels += [3] # All ones
-            return data, np.asarray(labels,dtype='float32')
+        # Create labels synthetically
+        labels  = [0] # All zeros
+        labels += [1]*(2**cols-2) # Bars
+        labels += [2]*(2**rows-2) # Stripes
+        labels += [3] # All ones
+        return data, np.asarray(labels,dtype='float32')
 
 class OptDigits(torchvision.datasets.vision.VisionDataset):
     """ Based on the MNIST Dataset implementation, but enough differences to not
@@ -285,9 +276,8 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
     classes = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four',
                '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
 
-    def __init__(self, root, train = True,
-                 transform = None, target_transform = None,
-                 download = True):
+    def __init__(self, root, train=True, transform=None, target_transform=None,
+                 download=True):
         super(OptDigits, self).__init__(root, transform=transform,
                                     target_transform=target_transform)
         self.train = train
@@ -346,3 +336,54 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
             if not torchvision.datasets.utils.check_integrity(fpath,md5):
                 raise RuntimeError("File not found or corrupted.")
             break
+
+def _embed_labels(dataset, axis=0, reversed=False, append=True,
+                  encoding='binary', inplace=True):
+    """
+    Args:
+        dataset (torch.utils.data.Dataset): Torch dataset object
+
+        axis (int): determines the direction of the embedded labels (0 or 1)
+
+        append (bool): wether the label is at the first or last line of `axis'
+
+        enconding {'binary','one_hot'}: representation of label
+
+    Returns:
+        If inplace is False, returns the new data and labels arrays in a tuple.
+
+    """
+
+    if inplace:
+        data,targets = dataset.data,dataset.targets
+    else:
+        data,targets = dataset.data.copy(),dataset.targets.copy()
+
+    labels = torch.LongTensor(targets.flatten())
+    if encoding=='one_hot':
+        N = len(dataset.classes)
+        labels = F.one_hot(labels,N)
+    elif encoding=='binary':
+        N = int(np.log2(len(dataset.classes)-1)+1)
+        bin_array = np.arange(N,dtype=int)
+        binary_repr = lambda x: x[:,None] & (1 << bin_array) > 0
+        labels = binary_repr(labels)
+    else:
+        raise ValueError(f"Invalid encoding: {encoding}")
+
+    M = -1 if append else 0
+    if axis==0:
+        if reversed:
+            data[:,M,N:] = labels
+        else:
+            data[:,M,:-N] = labels
+    elif axis==1:
+        if reversed:
+            data[:,-N:,M] = labels
+        else:
+            data[:,:N,M] = labels
+    else:
+        raise ValueError(f"Invalid axis: {axis}")
+
+    if not inplace:
+        return data, labels

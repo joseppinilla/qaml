@@ -36,6 +36,26 @@ class EnergyBasedModel(torch.nn.Module):
             A[V+hi,V+hj] = self.hh
         return A.detach().numpy()
 
+    def to_networkx_graph(self, node_attribute_name='bias',
+                          edge_attribute_name='bias'):
+        import networkx as nx
+
+        EBM = nx.Graph()
+        matrix = self.matrix.copy()
+        diag = np.diagonal(matrix)
+
+        linear = ((v, {node_attribute_name: bias,
+                       'vartype': self.vartype,
+                       'subset': 0 if v<self.V else 1})
+                        for v, bias in enumerate(diag))
+        EBM.add_nodes_from(linear)
+
+        quadratic = ((u, v, {edge_attribute_name : matrix[u,v],
+                             'vartype': self.vartype})
+                             for u,v in zip(*np.triu_indices(len(EBM),1)))
+        EBM.add_edges_from(quadratic)
+        return EBM
+
     def change_vartype(self, vartype):
         if vartype is dimod.SPIN and self.vartype is dimod.BINARY:
             self.vartype = vartype
