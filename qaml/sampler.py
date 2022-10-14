@@ -388,10 +388,11 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
                 cache = minorminer.busclique.busgraph_cache(target)
                 embedding = cache.find_clique_embedding(model.V + model.H)
             if not embedding:
-                warnings.warn("Embedding not found")
+                raise RuntimeError("Embedding not found")
         if chain_imbalance is None:
             source = dimod.to_networkx_graph(bqm)
-            embedding = qaml.prune.trim_embedding(target,embedding,source)
+            embedding,trimmed = qaml.prune.trim_embedding(target,embedding,source)
+            if trimmed: print(f"Trimmed {trimmed} dangling qubits.")
         if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
             embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
         self.embedding = embedding

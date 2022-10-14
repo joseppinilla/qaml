@@ -6,6 +6,9 @@ import torchvision
 
 import numpy as np
 import torch.nn.functional as F
+import torchvision.transforms as torch_transforms
+
+from PIL import Image
 
 class PhaseState(torch.utils.data.Dataset):
     """ Synthetic data points that represent the phase of a 1D state at N
@@ -251,16 +254,16 @@ class BAS(torch.utils.data.Dataset):
             pattern = np.repeat([h], cols, 1)
             stripes.append(pattern.reshape(rows,cols))
 
-        data = np.asarray(np.concatenate((bars[:-1], # ignore all ones
-                                         stripes[1:]), # ignore all zeros
-                                         axis=0),dtype='float32')
+        data = torch.DoubleTensor(np.concatenate((bars[:-1], #ignore all one
+                                                  stripes[1:]), #ignore all zero
+                                                  axis=0))
 
         # Create labels synthetically
-        labels  = [0] # All zeros
+        labels  = [0] # All zero
         labels += [1]*(2**cols-2) # Bars
         labels += [2]*(2**rows-2) # Stripes
-        labels += [3] # All ones
-        return data, np.asarray(labels,dtype='float32')
+        labels += [3] # All one
+        return data, torch.LongTensor(labels)
 
 class OptDigits(torchvision.datasets.vision.VisionDataset):
     """ Based on the MNIST Dataset implementation, but enough differences to not
@@ -296,6 +299,10 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
 
         img, target = self.data[index], self.targets[index]
 
+        # doing this so that it is consistent with all other datasets
+        # to return a PIL Image
+        img = Image.fromarray(img.numpy(), mode="L")
+
         if self.transform is not None:
             img = self.transform(img)
 
@@ -307,9 +314,9 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
     def _load_data(self):
         filename, _ = self.training_file if self.train else self.test_file
         fpath = os.path.join(self.raw_folder, filename)
-        dataset = np.genfromtxt(fpath,delimiter=',',dtype='float32')
-        data,targets = np.split(dataset,[64],1)
-        return data.reshape((len(data),8,8))/16, targets.flatten()
+        dataset = torch.from_numpy(np.genfromtxt(fpath,delimiter=',',dtype='uint8'))
+        data,targets = torch.split(dataset,[64,1],1)
+        return data.view(-1,8,8)*15, targets.squeeze().to(torch.int64)
 
     @property
     def raw_folder(self) -> str:
@@ -338,8 +345,8 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
             break
 
 def _embed_labels(dataset, axis=0, reversed=False, append=True,
-                  encoding='binary', inplace=True):
-    """
+                  encoding='binary', scale=1):
+    """ Modifies the images of a dataset to include a binary or one hot label.
     Args:
         dataset (torch.utils.data.Dataset): Torch dataset object
 
@@ -349,25 +356,21 @@ def _embed_labels(dataset, axis=0, reversed=False, append=True,
 
         enconding {'binary','one_hot'}: representation of label
 
-    Returns:
-        If inplace is False, returns the new data and labels arrays in a tuple.
-
     """
 
-    if inplace:
-        data,targets = dataset.data,dataset.targets
-    else:
-        data,targets = dataset.data.copy(),dataset.targets.copy()
+    data,targets = dataset.data,dataset.targets
 
     labels = torch.LongTensor(targets.flatten())
     if encoding=='one_hot':
         N = len(dataset.classes)
-        labels = F.one_hot(labels,N)
+        labelset = torch.unique(dataset.targets)
+        labelidx = torch.searchsorted(labelset,labels)
+        labels = F.one_hot(labelidx,N)*scale
     elif encoding=='binary':
         N = int(np.log2(len(dataset.classes)-1)+1)
         bin_array = np.arange(N,dtype=int)
         binary_repr = lambda x: x[:,None] & (1 << bin_array) > 0
-        labels = binary_repr(labels)
+        labels = binary_repr(labels)*scale
     else:
         raise ValueError(f"Invalid encoding: {encoding}")
 
@@ -385,5 +388,45 @@ def _embed_labels(dataset, axis=0, reversed=False, append=True,
     else:
         raise ValueError(f"Invalid axis: {axis}")
 
-    if not inplace:
-        return data, labels
+def _subset_classes(dataset, subclasses):
+    idx = [i for i,y in enumerate(dataset.targets) if y in subclasses]
+    dataset.classes = [dataset.classes[i] for i in subclasses]
+    dataset.data = dataset.data[idx]
+    dataset.targets = dataset.targets[idx]
+
+class ToBinaryTensor:
+    def __init__(self, threshold):
+        self.threshold = threshold
+    def __call__(self, pic):
+        """
+        Args:
+            pic (Image or numpy.ndarray): Image to be converted to bool Tensor
+
+        Returns:
+            Tensor: Converted image.
+        """
+        if isinstance(pic,Image.Image):
+            pic = torch_transforms.functional.to_tensor(pic)
+
+        return torch.round(pic)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
+
+class ToSpinTensor:
+    def __init__(self, threshold=0.0):
+        self.threshold = threshold
+    def __call__(self, pic):
+        """
+        Args:
+            pic (Image or numpy.ndarray): Image to be converted to spin Tensor
+
+        Returns:
+            Tensor: Converted image.
+        """
+        if isinstance(pic,Image.Image):
+            pic = torch_transforms.functional.to_tensor(pic)
+        return (2.0*torch.round(pic)-1.0)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
