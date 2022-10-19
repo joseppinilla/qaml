@@ -80,6 +80,9 @@ class EnergyBasedModel(torch.nn.Module):
     def forward(self, visible):
         raise NotImplementedError("This model doesn't support forward()")
 
+    def __len__(self):
+        return self.V + self.H
+
 EBM = EnergyBasedModel
 
 class BoltzmannMachine(EnergyBasedModel):

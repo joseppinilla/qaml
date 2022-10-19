@@ -426,7 +426,7 @@ class ToSpinTensor:
         """
         if isinstance(pic,Image.Image):
             pic = torch_transforms.functional.to_tensor(pic)
-        return (2.0*torch.round(pic)-1.0)
+        return (2.0*torch.round(pic)-1.0).to(torch.float64)
 
     def __repr__(self):
         return self.__class__.__name__ + '()'

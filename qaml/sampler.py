@@ -755,3 +755,10 @@ class RepurposeQASampler(QASampler):
             model.W.data = torch.randn(new_H,model.V)
 
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
+
+
+def _harvest_cliques(N, T, seed=None):
+    while emb:=minorminer.busclique.find_clique_embedding(N,T,use_cache=False):
+        for v,chain in emb.items():
+            T.remove_nodes_from(chain)
+        yield embedding
