@@ -344,11 +344,13 @@ class OptDigits(torchvision.datasets.vision.VisionDataset):
                 raise RuntimeError("File not found or corrupted.")
             break
 
-def _embed_labels(dataset, axis=0, reversed=False, append=True,
-                  encoding='binary', scale=1):
-    """ Modifies the images of a dataset to include a binary or one hot label.
+def _embed_labels(dataset, axis=1, reversed=False, append=True, scale=1,
+                  encoding='binary', setter_getter=False, inplace=True):
+    """ Embeds a binary or one-hot label into a dataset of 1-channel images.
+
     Args:
-        dataset (torch.utils.data.Dataset): Torch dataset object
+        dataset (torch.utils.data.Dataset): Torch dataset object with data of
+            shape (S,M,N)
 
         axis (int): determines the direction of the embedded labels (0 or 1)
 
@@ -358,41 +360,58 @@ def _embed_labels(dataset, axis=0, reversed=False, append=True,
 
     """
 
-    data,targets = dataset.data,dataset.targets
-
+    data,targets = dataset.data.squeeze(),dataset.targets.squeeze()
+    S,M,N = data.shape
     labels = torch.LongTensor(targets.flatten())
     if encoding=='one_hot':
-        N = len(dataset.classes)
+        C = len(dataset.classes)
         labelset = torch.unique(dataset.targets)
         labelidx = torch.searchsorted(labelset,labels)
-        labels = F.one_hot(labelidx,N)*scale
+        labels = F.one_hot(labelidx,C)*scale
     elif encoding=='binary':
-        N = int(np.log2(len(dataset.classes)-1)+1)
-        bin_array = np.arange(N,dtype=int)
+        C = int(np.log2(len(dataset.classes)-1)+1)
+        bin_array = np.arange(C,dtype=int)
         binary_repr = lambda x: x[:,None] & (1 << bin_array) > 0
         labels = binary_repr(labels)*scale
     else:
         raise ValueError(f"Invalid encoding: {encoding}")
 
-    M = -1 if append else 0
+    A = -1 if append else 0
+
     if axis==0:
+        assert C<=M, f'Not enough space in axis=0 for one-hot label: {C} > {M}'
         if reversed:
-            data[:,M,N:] = labels
+            def setter(x,y): x[:,A,-C:N] = y; return x
+            def getter(x): return x[:,A,-C:N]
         else:
-            data[:,M,:-N] = labels
+            def setter(x,y): x[:,A,0:C] = y; return x
+            def getter(x): return x[:,A,0:C]
     elif axis==1:
+        assert C<=N, f'Not enough space in axis=1 for one-hot label: {C} > {N}'
         if reversed:
-            data[:,-N:,M] = labels
+            def setter(x,y): x[:,-C:M,A] = y; return x
+            def getter(x): return x[:,-C:M,A]
         else:
-            data[:,:N,M] = labels
+            def setter(x,y): x[:,0:C,A] = y; return x
+            def getter(x): return x[:,0:C,A]
     else:
         raise ValueError(f"Invalid axis: {axis}")
+    # Set labels
+    if inplace:
+        _ = setter(data,labels)
+    else:
+        return setter(data.copy(),labels)
 
-def _subset_classes(dataset, subclasses):
+    if setter_getter:
+        return setter, getter
+
+def _subset_classes(dataset, subclasses, return_indices=False):
     idx = [i for i,y in enumerate(dataset.targets) if y in subclasses]
     dataset.classes = [dataset.classes[i] for i in subclasses]
     dataset.data = dataset.data[idx]
     dataset.targets = dataset.targets[idx]
+    if return_indices:
+        return idx
 
 class ToBinaryTensor:
     def __init__(self, threshold):

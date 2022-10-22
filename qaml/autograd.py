@@ -2,7 +2,7 @@ import dimod
 import torch
 import numpy as np
 
-class GeneralBoltzmannMachine(torch.autograd.Function):
+class MaximumLikelihood(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, sampler, pos_phase, neg_phase, *weights):

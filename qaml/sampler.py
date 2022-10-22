@@ -212,7 +212,7 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         else:
             return self._qubo
 
-    def to_ising(self, fixed_vars=None):
+    def to_ising(self, fixed_vars={}):
         self._ising = self.to_bqm(fixed_vars).spin
         return self._ising
 
@@ -372,10 +372,12 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
     scalar = 1.0
     embedding = None
     auto_scale = True
+    batch_mode = False
+    batch_embeddings = None
 
     def __init__(self, model, embedding=None, beta=1.0, auto_scale=True,
                  chain_imbalance=None, failover=False, retry_interval=-1,
-                 **conf):
+                 batch_mode=False, **conf):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
         bqm = self.to_bqm()
         self.sampler = dwave.system.DWaveSampler(failover,retry_interval,**conf)
@@ -386,7 +388,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
                 embedding = cache.find_biclique_embedding(model.V,model.H)
             else:
                 cache = minorminer.busclique.busgraph_cache(target)
-                embedding = cache.find_clique_embedding(model.V + model.H)
+                embedding = cache.find_clique_embedding(len(model))
             if not embedding:
                 raise RuntimeError("Embedding not found")
         if chain_imbalance is None:
@@ -395,6 +397,11 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
             if trimmed: print(f"Trimmed {trimmed} dangling qubits.")
         if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
             embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
+        if batch_mode:
+            embeddings = _harvest_cliques(target,model.H)
+            self.batch_embeddings = [{model.V+v:chain for v,chain in emb.items()} for emb in embeddings]
+            self.batch_mode = len(self.batch_embeddings)
+
         self.embedding = embedding
         self.auto_scale = auto_scale
 
@@ -406,13 +413,13 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         self._networkx_graph = self.sampler.to_networkx_graph()
         return self._networkx_graph
 
-    def embed_bm(self, ising, flip_variables=[], **embed_kwargs):
+    def embed_bm(self, ising, embedding=None, flip_variables=[], **embed_kwargs):
 
         bqm = ising.copy()
         for v in flip_variables:
             bqm.flip_variable(v)
 
-        embedding = self.embedding
+        embedding = self.embedding if embedding is None else embedding
         target_bqm = embedding.embed_bqm(bqm,**embed_kwargs)
         ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
         scale_kwargs = {'ignored_interactions':ignoring}
@@ -428,12 +435,29 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
         return target_bqm
 
-    def sample_bm(self, input_data=[], embed_kwargs={}, unembed_kwargs={}, **sample_kwargs):
-
-        clamp_arr = np.asarray(input_data).flatten()
-        fixed_vars = {q:v for q,v in enumerate(clamp_arr) if v is not None}
-
-        ising = self.to_ising(fixed_vars)
+    def sample_bm(self, fixed_vars=[], embed_kwargs={}, unembed_kwargs={}, **sample_kwargs):
+        num_inputs = len(fixed_vars)
+        batch_size = self.batch_mode
+        edgelist = self.networkx_graph.edges
+        if num_inputs == 0:
+            ising = self.to_ising()
+            embedding = self.embedding
+        elif num_inputs == 1:
+            ising = self.to_ising(*fixed_vars)
+            clamped_emb = {v:self.embedding[v] for v in ising.variables}
+            embedding = dwave.embedding.EmbeddedStructure(edgelist,clamped_emb)
+        elif num_inputs <= batch_size:
+            batch_embs = self.batch_embeddings
+            batch_bqms = [self.to_ising(fix) for fix in fixed_vars]
+            ising = dimod.BinaryQuadraticModel.empty(self.model.vartype)
+            combined_emb = {}
+            for i,(bqm,emb) in enumerate(zip(batch_bqms,batch_embs)):
+                labels = {v:v+(i*len(bqm)) for v in bqm.variables}
+                combined_emb.update({v+(i*len(bqm)):chain for v,chain in emb.items()})
+                ising.update(bqm.relabel_variables(labels,inplace=False))
+            embedding = dwave.embedding.EmbeddedStructure(edgelist,combined_emb)
+        else:
+            raise ValueError(f'Input ({num_inputs}) != batch ({batch_size})')
 
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
         sample_kwargs = {**self.sample_kwargs,**sample_kwargs}
@@ -450,17 +474,16 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         else:
             iter_num_reads = [num_reads]
 
-        transform=[]
+        transform = []
         responses = []
 
-        embedding = {v:chain for (v,chain) in self.embedding.items() if v in ising.variables}
-
         for num_reads in iter_num_reads:
+
             # Don't flip if num_spin_reversal_transforms is 0
             if num_spinrevs > 0:
                 transform = [v for v in ising.variables if random() > .5]
 
-            target_bqm = self.embed_bm(ising,flip_variables=transform,**embed_kwargs)
+            target_bqm = self.embed_bm(ising,embedding,flip_variables=transform,**embed_kwargs)
             target_response = self.sampler.sample(target_bqm,auto_scale=False,
                                           num_reads=num_reads,answer_mode='raw',
                                           num_spin_reversal_transforms=0,
@@ -479,33 +502,36 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
             responses.append(flipped_response)
 
         sampleset = dimod.sampleset.concatenate(responses)
-        self.sampleset = dimod.append_variables(sampleset,fixed_vars)
-        return self.sampleset
+        samples = sampleset.record.sample.copy() # (num_reads,variables)
 
-    def reconstruct(self, input_data, mask=None, num_reads=100,
-                    embed_kwargs={}, unembed_kwargs={}, **kwargs):
+        if num_inputs == 0:
+            self.sampleset = samples # (num_reads,V+H)
+        elif num_inputs == 1:
+            fixed, _ = dimod.as_samples(fixed_vars) # (1,V) -> (num_reads,V)
+            self.sampleset = np.hstack((np.repeat(fixed,num_reads,0),samples))
+        elif num_inputs <= batch_size:
+            split_samples = np.split(samples,len(batch_bqms),axis=1) # [(num_reads,H)*BATCH_SIZE]
+            mean_samples = np.mean(split_samples,axis=1) #(BATCH_SIZE,H)
 
-        input_arr = np.asarray(input_data).flatten()
-        clamp = [v if mask[i] else None for i,v in enumerate(input_arr)]
+            fixed = [f for f,_ in map(dimod.as_samples,fixed_vars)] #(BATCH_SIZE,V)
+            self.sampleset = np.hstack((np.concatenate(fixed),mean_samples))
 
-        kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
-        sampleset = self.sample_bm(clamp,embed_kwargs,unembed_kwargs,**kwargs)
-
-        samples = sampleset.record.sample.copy()
-        sampletensor = torch.tensor(samples,dtype=torch.float64)
-
+        sampletensor = torch.tensor(self.sampleset,dtype=torch.float64)
         return sampletensor.split([self.model.V,self.model.H],1)
 
-    def forward(self, input_data=None, num_reads=100,
+    def reconstruct(self, input_data, mask, num_reads=100,
+                    embed_kwargs={}, unembed_kwargs={}, **kwargs):
+
+        kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
+        fixed_vars = [{i:v.item() for i,v in enumerate(d) if mask[i]} for d in input_data]
+        return self.sample_bm(fixed_vars,embed_kwargs,unembed_kwargs,**kwargs)
+
+    def forward(self, input_data=[], num_reads=100,
                 embed_kwargs={}, unembed_kwargs={}, **kwargs):
 
         kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
-        sampleset = self.sample_bm(input_data,embed_kwargs,unembed_kwargs,**kwargs)
-
-        samples = sampleset.record.sample.copy()
-        sampletensor = torch.tensor(samples,dtype=torch.float64)
-
-        return sampletensor.split([self.model.V,self.model.H],1)
+        fixed_vars = [{i:v.item() for i,v in enumerate(d)} for d in input_data]
+        return self.sample_bm(fixed_vars,embed_kwargs,unembed_kwargs,**kwargs)
 
 QASampler = QuantumAnnealingNetworkSampler
 
@@ -757,8 +783,9 @@ class RepurposeQASampler(QASampler):
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
 
-def _harvest_cliques(N, T, seed=None):
+def _harvest_cliques(target, N, seed=None):
+    T = target.copy()
     while emb:=minorminer.busclique.find_clique_embedding(N,T,use_cache=False):
         for v,chain in emb.items():
             T.remove_nodes_from(chain)
-        yield embedding
+        yield emb
