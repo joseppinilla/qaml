@@ -79,7 +79,7 @@ class GibbsNetworkSampler(NetworkSampler):
         self.return_prob = return_prob
 
     @torch.no_grad()
-    def reconstruct(self, input_data, k=1, mask=None):
+    def reconstruct(self, input_data, mask=None, k=1):
         beta = self.beta
 
         if mask is None: mask = torch.ones_like(self.prob_v)
@@ -249,7 +249,7 @@ class SimulatedAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         sa_kwargs = {**self.sa_kwargs,**kwargs}
         sampleset = self.sampler.sample(bqm,num_reads=num_reads,**sa_kwargs)
         samples = sampleset.record.sample.copy()
-        sampletensor = torch.tensor(samples,dtype=torch.float64)
+        sampletensor = torch.tensor(samples,dtype=torch.float32)
         self.sampleset = sampleset
 
         if input_data is None:
@@ -516,7 +516,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
             fixed = [f for f,_ in map(dimod.as_samples,fixed_vars)] #(BATCH_SIZE,V)
             self.sampleset = np.hstack((np.concatenate(fixed),mean_samples))
 
-        sampletensor = torch.tensor(self.sampleset,dtype=torch.float64)
+        sampletensor = torch.tensor(self.sampleset,dtype=torch.float32)
         return sampletensor.split([self.model.V,self.model.H],1)
 
     def reconstruct(self, input_data, mask, num_reads=100,
@@ -628,7 +628,7 @@ class AdachiQASampler(QASampler):
                 b = bias / len(disjoint_chain)
                 target_bqm.add_variables_from({u: b for u in disjoint_chain})
             else:
-                raise MissingChainError(v)
+                raise dimod.MissingChainError(v)
 
         for (u, v), bias in bqm.quadratic.items():
             if u in self.disjoint_chains:

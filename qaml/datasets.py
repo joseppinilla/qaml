@@ -87,7 +87,7 @@ class PhaseState(torch.utils.data.Dataset):
     def generate(cls, N, labeled=False, random_seed=42):
         rng = np.random.default_rng(random_seed)
         if not labeled:
-            return np.triu(np.ones((N+1,N),dtype='float64')), np.arange(N+1)
+            return np.triu(np.ones((N+1,N),dtype='float32')), np.arange(N+1)
         else:
             phase = np.triu(np.ones((N+1,N)))
 
@@ -95,7 +95,7 @@ class PhaseState(torch.utils.data.Dataset):
             int_set = set(phase.dot(2**np.arange(phase[0].size)[::-1]))
             R = min(N*3-1, ((2**N)//2))
             labels = np.asarray(np.concatenate((np.zeros(N+1),np.ones(R))),
-                                dtype='float64')
+                                dtype='float32')
 
             while i:=0 < R:
                 rand_set = []
@@ -110,7 +110,7 @@ class PhaseState(torch.utils.data.Dataset):
                 return np.asarray(list(np.binary_repr(x).zfill(width)),int)
 
             random = [int2binarray(x,N) for x in rand_set]
-            data = np.asarray(np.concatenate((phase,random)),dtype='float64')
+            data = np.asarray(np.concatenate((phase,random)),dtype='float32')
 
             return data, labels
 
@@ -445,7 +445,7 @@ class ToSpinTensor:
         """
         if isinstance(pic,Image.Image):
             pic = torch_transforms.functional.to_tensor(pic)
-        return (2.0*torch.round(pic)-1.0).to(torch.float64)
+        return (2.0*torch.round(pic)-1.0).to(torch.float32)
 
     def __repr__(self):
         return self.__class__.__name__ + '()'

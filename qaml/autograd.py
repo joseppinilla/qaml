@@ -75,7 +75,7 @@ class MaximumLikelihood(torch.autograd.Function):
         return None, None, None, b_grad, c_grad, vv_grad, hh_grad, W_grad
 
 
-class ConstrastiveDivergence(torch.autograd.Function):
+class ContrastiveDivergence(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, sampler, pos_phase, neg_phase, bias_v, bias_h, weights):
