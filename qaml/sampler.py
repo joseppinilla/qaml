@@ -88,7 +88,7 @@ class GibbsNetworkSampler(NetworkSampler):
         mask_value = sum(self.model.vartype.value)/2.0
         clamp = torch.mul(input_data.detach().clone(),mask)
         prob_v = clamp.clone().masked_fill_((mask==0),mask_value)
-        prob_h = self.model.forward(self.sample(prob_v),scale=beta)
+        prob_h = self.model.forward(prob_v,scale=beta)
         for _ in range(k):
             recon = self.model.generate(self.sample(prob_h),scale=beta)
             prob_v.data = clamp + (mask==0)*recon
@@ -201,7 +201,7 @@ class BinaryQuadraticModelSampler(NetworkSampler):
         else:
             return self._bqm
 
-    def to_qubo(self, fixed_vars=None):
+    def to_qubo(self, fixed_vars={}):
         self._qubo = self.to_bqm(fixed_vars).binary
         return self._qubo
 

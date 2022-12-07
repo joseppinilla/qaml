@@ -46,12 +46,13 @@ def distance_from_gibbs(model, samples, beta_range=None):
 @torch.no_grad()
 def finite_sampling_error(model, beta_range=None, num_reads=int(10e6),
                           reduction='sum'):
-    """ Test a range of inverse temperature values and find the
+    """ Test a range of inverse temperature values and find the closest match
+        betwween exact probabilities and num_reads-samples.
         Arg:
             model (qaml.nn.BoltzmannMachine): A BM model
-            samples (Tensor,Tensor): Visible and hidden samples.
             beta_range (iterable or None): Range of beta values to evaluate
                 against.
+            num_reads (int): Number of samples
         Return:
             beta (float):
             distance (float):
@@ -83,7 +84,7 @@ def finite_sampling_error(model, beta_range=None, num_reads=int(10e6),
 
         if reduction == 'sum':
             dist_i = sum(EP_diff.values())/2
-        elif reduction == 'mac':
+        elif reduction == 'max':
             dist_i = max(EP_diff.values())/2
         distances.append(dist_i)
     return beta_range, distances

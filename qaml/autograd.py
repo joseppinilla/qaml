@@ -16,8 +16,8 @@ class MaximumLikelihood(torch.autograd.Function):
             return 2.0*samples - 1.0
 
         if (sampler.return_prob) and (vartype is dimod.SPIN):
-            samples_v0, samples_h0 = to_spin(samples_v0),to_spin(samples_h0)
-            samples_vk, samples_hk = to_spin(samples_vk),to_spin(samples_hk)
+            samples_v0, samples_h0 = samples_v0, to_spin(samples_h0)
+            samples_vk, samples_hk = to_spin(samples_vk), to_spin(samples_hk)
 
         expect_0 = torch.mean(samples_v0,dim=0)
         expect_k = torch.mean(samples_vk,dim=0)
@@ -89,8 +89,8 @@ class ContrastiveDivergence(torch.autograd.Function):
             return 2.0*samples - 1.0
 
         if (sampler.return_prob) and (vartype is dimod.SPIN):
-            samples_v0, samples_h0 = to_spin(samples_v0),to_spin(samples_h0)
-            samples_vk, samples_hk = to_spin(samples_vk),to_spin(samples_hk)
+            samples_v0, samples_h0 = samples_v0, to_spin(samples_h0)
+            samples_vk, samples_hk = to_spin(samples_vk), to_spin(samples_hk)
 
         expect_0 = torch.mean(samples_v0,dim=0)
         expect_k = torch.mean(samples_vk,dim=0)

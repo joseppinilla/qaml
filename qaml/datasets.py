@@ -414,8 +414,6 @@ def _subset_classes(dataset, subclasses, return_indices=False):
         return idx
 
 class ToBinaryTensor:
-    def __init__(self, threshold):
-        self.threshold = threshold
     def __call__(self, pic):
         """
         Args:
@@ -433,8 +431,6 @@ class ToBinaryTensor:
         return self.__class__.__name__ + '()'
 
 class ToSpinTensor:
-    def __init__(self, threshold=0.0):
-        self.threshold = threshold
     def __call__(self, pic):
         """
         Args:
