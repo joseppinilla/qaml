@@ -15,17 +15,24 @@ def distance_from_gibbs(model, samples, beta_range=None):
             beta (float):
             distance (float):
     """
+    # Join visible and hidden
+    sampleset = torch.cat(samples,1).tolist()
+
     if beta_range is None:
         beta_range = iter(np.linspace(1,6,11))
 
+    #  Calculate exact energies
     solver = qaml.sampler.ExactNetworkSampler(model)
-    sampleset = torch.cat(samples,1).tolist()
+    energies = solver.get_energies()
+
+    # Calculate sample energies
     E_samples = solver.to_bqm().energies(sampleset)
     unique, counts = np.unique(E_samples, return_counts=True)
     EP_samples = dict(zip(unique, counts/len(E_samples)))
 
+
+    # Iterate over beta distributions
     dist_eff = float('inf')
-    energies = solver.get_energies()
     for beta_i in beta_range:
         Z = np.exp(-beta_i*energies).sum()
         probs = torch.Tensor(np.exp(-beta_i*energies)/Z)
@@ -88,3 +95,53 @@ def finite_sampling_error(model, beta_range=None, num_reads=int(10e6),
             dist_i = max(EP_diff.values())/2
         distances.append(dist_i)
     return beta_range, distances
+
+@torch.no_grad()
+def free_energy_smooth_kl(model, dataset, samples, bins=32, smooth=1e-6):
+    """ Computes the smoothed KL divergence between two sample sets.
+        e.g. Designed for the dataset and a sampler output.
+        Arg:
+            model (qaml.nn.BoltzmannMachine): A BM model
+            dataset (Tensor(D,V)): Dataset input
+            samples (Tensor(S,V)): Sampler outputs
+            bins (int): Number of bins in histograms
+            smooth (float): Smoothing epsilon value. smooth=0 for no smoothing
+        Returns:
+            kl_div (Tensor(1)): D_KL(p_dataset || p_samples)
+    """
+    # Free energies
+    E_samples = model.free_energy(samples)
+    E_dataset = model.free_energy(dataset)
+
+    # Find valid range
+    E_min = min(E_samples.min(),E_dataset.min()).item()
+    E_max = max(E_samples.max(),E_dataset.max()).item()
+
+    # Histograms with shared bin edges
+    d_hist, bin_edges = torch.histogram(E_dataset, bins=bins, range=(E_min,E_max))
+    s_hist, _ = torch.histogram(E_samples, bins=bins, range=(E_min,E_max))
+
+    return smooth_kl(d_hist/len(dataset), s_hist/len(samples), smooth)
+
+@torch.no_grad()
+def smooth_kl(P, Q, smooth=1e-6):
+    """ Computes the snoothed KL divergence between two probabilites.
+        Arg:
+            P (Tensor): Probability array
+            Q (Tensor): Probability array
+            smooth (float): Smoothing epsilon value. smooth=0 for no smoothing
+        Returns:
+            kl_div (Tensor(1)): D_KL(P || Q)
+    """
+    # Smoothing of sample data i.e. divisor
+    smooth_mask = (P > 0) & (Q == 0)
+    not_smooth_mask = ~smooth_mask
+    Q[smooth_mask] = P[smooth_mask] * smooth
+    Q[not_smooth_mask] -= Q[smooth_mask].sum() / not_smooth_mask.sum()
+
+    # Take intersection of supports, i.e. ignore if both zero
+    support_intersection = (P > 0) & (Q > 0)
+    P = P[support_intersection]
+    Q = Q[support_intersection]
+
+    return (P*torch.log(P/Q)).sum()
