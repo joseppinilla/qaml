@@ -69,7 +69,6 @@ def finite_sampling_error(model, beta_range=None, num_reads=int(10e6),
 
     solver = qaml.sampler.ExactNetworkSampler(model)
     energies = solver.get_energies()
-    solutions = solver.sampleset
 
     distances = []
     for beta_i in beta_range:
@@ -103,7 +102,7 @@ def free_energy_smooth_kl(model, dataset, samples, bins=32, smooth=1e-6):
         Arg:
             model (qaml.nn.BoltzmannMachine): A BM model
             dataset (Tensor(D,V)): Dataset input
-            samples (Tensor(S,V)): Sampler outputs
+            samples (Tensor(S,V)): Sampler output
             bins (int): Number of bins in histograms
             smooth (float): Smoothing epsilon value. smooth=0 for no smoothing
         Returns:
@@ -112,20 +111,27 @@ def free_energy_smooth_kl(model, dataset, samples, bins=32, smooth=1e-6):
     # Free energies
     E_samples = model.free_energy(samples)
     E_dataset = model.free_energy(dataset)
-
     # Find valid range
     E_min = min(E_samples.min(),E_dataset.min()).item()
     E_max = max(E_samples.max(),E_dataset.max()).item()
 
-    # Histograms with shared bin edges
-    d_hist, bin_edges = torch.histogram(E_dataset, bins=bins, range=(E_min,E_max))
-    s_hist, _ = torch.histogram(E_samples, bins=bins, range=(E_min,E_max))
+    if bins is None:
+        # Automatic bins and range from dataset
+        d_hist, bin_edges = torch.histogram(E_dataset,range=(E_min,E_max))
+        bins = len(bin_edges)-1
+    else: # Histograms with shared bin edges
+        d_hist, bin_edges = torch.histogram(E_dataset,bins,range=(E_min,E_max))
+
+    # Matching range and bin for samples
+    s_hist, _ = torch.histogram(E_samples,bins,range=(E_min,E_max))
 
     return smooth_kl(d_hist/len(dataset), s_hist/len(samples), smooth)
 
 @torch.no_grad()
 def smooth_kl(P, Q, smooth=1e-6):
-    """ Computes the snoothed KL divergence between two probabilites.
+    """ Computes the smoothed KL divergence between two probabilites.
+        Based on implementation by Cameron Perot:
+        https://jugit.fz-juelich.de/qip/qbm-quant-finance/
         Arg:
             P (Tensor): Probability array
             Q (Tensor): Probability array

@@ -83,6 +83,9 @@ class EnergyBasedModel(torch.nn.Module):
     def __len__(self):
         return self.V + self.H
 
+    def __repr__(self):
+        return f'RestrictedBoltzmannMachine({self.V},{self.H})'
+
 EBM = EnergyBasedModel
 
 class BoltzmannMachine(EnergyBasedModel):
