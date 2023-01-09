@@ -376,38 +376,38 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
     batch_embeddings = None
 
     def __init__(self, model, embedding=None, beta=1.0, auto_scale=True,
-                 chain_imbalance=None, failover=False, retry_interval=-1,
+                 chain_imbalance=0, failover=False, retry_interval=-1,
                  batch_mode=False, **conf):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
-        bqm = self.to_bqm()
-        self.sampler = dwave.system.DWaveSampler(failover,retry_interval,**conf)
-        target = self.networkx_graph
+
+        sampler = dwave.system.DWaveSampler(failover,retry_interval,**conf)
         if embedding is None:
-            if 'Restricted' in repr(self.model):
-                cache = minorminer.busclique.busgraph_cache(target)
-                embedding = cache.find_biclique_embedding(model.V,model.H)
-            else:
-                cache = minorminer.busclique.busgraph_cache(target)
-                embedding = cache.find_clique_embedding(len(model))
-            if not embedding:
-                raise RuntimeError("Embedding not found")
-        if chain_imbalance is None:
-            source = dimod.to_networkx_graph(bqm)
-            embedding,trimmed = qaml.prune.trim_embedding(target,embedding,source)
-            if trimmed: print(f"Trimmed {trimmed} dangling qubits.")
+            embedding = qaml.minor.clique_from_cache(model,sampler)
+            assert embedding, "Embedding not found"
+
         if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
+            target = sampler.to_networkx_graph()
             embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
+
         if batch_mode:
-            embeddings = _harvest_cliques(target,model.H)
+            target = self.networkx_graph
+            embeddings = qaml.minor.harvest_cliques(target,model.H)
             self.batch_embeddings = [{model.V+v:chain for v,chain in emb.items()} for emb in embeddings]
             self.batch_mode = len(self.batch_embeddings)
 
+        self.sampler = sampler
         self.embedding = embedding
         self.auto_scale = auto_scale
 
     @classmethod
     def get_sampler(cls, failover=False, retry_interval=-1, **conf):
         return dwave.system.DWaveSampler(failover,retry_interval,**conf)
+
+    def set_embedding(self, embedding):
+        if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
+            target = self.sampler.to_networkx_graph()
+            embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
+        self.embedding = embedding
 
     def to_networkx_graph(self):
         self._networkx_graph = self.sampler.to_networkx_graph()
@@ -600,9 +600,10 @@ class AdachiQASampler(QASampler):
                 raise RuntimeError(f"No subgraphs were found for chain: {x}")
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
 
-    def embed_bm(self, bqm, **embed_kwargs):
-        embedding = self.embedding
+    def embed_bm(self, bqm, embedding, **embed_kwargs):
+
         embed_kwargs = {**self.embed_kwargs,**embed_kwargs}
+        embedding = self.embedding if embedding is None else embedding
 
         # Create new BQM including new subchains
         chain_strength = embed_kwargs['chain_strength']
@@ -781,11 +782,3 @@ class RepurposeQASampler(QASampler):
             model.W.data = torch.randn(new_H,model.V)
 
         self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
-
-
-def _harvest_cliques(target, N, seed=None):
-    T = target.copy()
-    while emb:=minorminer.busclique.find_clique_embedding(N,T,use_cache=False):
-        for v,chain in emb.items():
-            T.remove_nodes_from(chain)
-        yield emb
