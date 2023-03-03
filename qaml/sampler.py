@@ -11,7 +11,6 @@ import numpy as np
 import networkx as nx
 import dwave_networkx as dnx
 
-from random import random
 from minorminer.utils.polynomialembedder import processor
 
 class NetworkSampler(torch.nn.Module):
@@ -61,7 +60,8 @@ class GibbsNetworkSampler(NetworkSampler):
 
         Args:
             model (torch.nn.Module): PyTorch `Module` with `forward` method.
-
+            beta (float): inverse temperature for the sampler.
+            return_prob (bool, default=True): if True, returns probabilities.
         Example:
             >>> gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
             ...

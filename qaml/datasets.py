@@ -349,14 +349,17 @@ def _embed_labels(dataset, axis=1, reversed=False, append=True, scale=1,
     """ Embeds a binary or one-hot label into a dataset of 1-channel images.
 
     Args:
-        dataset (torch.utils.data.Dataset): Torch dataset object with data of
-            shape (S,M,N)
+        dataset (torch.utils.data.Dataset): dataset with data shape (S,M,N).
+        axis (int): determines the orientation of the embedded labels (0 or 1).
+        reversed (bool): determines the direction of the labels.
+        append (bool): wether the label is at the first or last line of `axis'.
+        scale (int): useful to match value of labels to range of data.
+        enconding {'binary','one_hot'}: representation of label.
+        setter_getter (bool): if True, returns the setter and getter methods.
+        inplace (bool): if True, modifies dataset object. Return data otherwise.
 
-        axis (int): determines the direction of the embedded labels (0 or 1)
-
-        append (bool): wether the label is at the first or last line of `axis'
-
-        enconding {'binary','one_hot'}: representation of label
+    Returns:
+        See 'setter_getter' and 'inplace' above. Otherwise, returns None.
 
     """
 
@@ -414,34 +417,37 @@ def _subset_classes(dataset, subclasses, return_indices=False):
         return idx
 
 class ToBinaryTensor:
-    def __call__(self, pic):
+    def __call__(self, data):
         """
         Args:
-            pic (Image or numpy.ndarray): Image to be converted to bool Tensor
+            data (Image or numpy.ndarray): Data to be converted to bool Tensor
 
         Returns:
             Tensor: Converted image.
         """
-        if isinstance(pic,Image.Image):
-            pic = torch_transforms.functional.to_tensor(pic)
-
-        return torch.round(pic)
+        if isinstance(data,Image.Image):
+            data = torch_transforms.functional.to_tensor(data)
+        elif not isinstance(data,torch.Tensor):
+            data = torch.tensor(data)
+        return torch.round(data)
 
     def __repr__(self):
         return self.__class__.__name__ + '()'
 
 class ToSpinTensor:
-    def __call__(self, pic):
+    def __call__(self, data):
         """
         Args:
-            pic (Image or numpy.ndarray): Image to be converted to spin Tensor
+            data (Image or numpy.ndarray): Data to be converted to spin Tensor
 
         Returns:
             Tensor: Converted image.
         """
-        if isinstance(pic,Image.Image):
-            pic = torch_transforms.functional.to_tensor(pic)
-        return (2.0*torch.round(pic)-1.0).to(torch.float32)
+        if isinstance(data,Image.Image):
+            data = torch_transforms.functional.to_tensor(data)
+        elif not isinstance(data,torch.Tensor):
+            data = torch.tensor(data)
+        return (2.0*torch.round(data)-1.0).to(torch.float32)
 
     def __repr__(self):
         return self.__class__.__name__ + '()'
