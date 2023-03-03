@@ -4,36 +4,36 @@ import networkx as nx
 import dwave.embedding
 
 
-
-
 def biclique_from_cache(model, sampler, seed=None):
-    T = sampler.to_networkx_graph()
+    """ Fetches the biclique embedding of the model onto the sampler """
+    T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
     cache = minorminer.busclique.busgraph_cache(T,seed=seed)
     return cache.find_biclique_embedding(model.V,model.H)
 
 
 def clique_from_cache(model, sampler, seed=None):
-    """ Fetches """
+    """ Fetches the clique embedding of the model onto the sampler """
     S = model if isinstance(model,int) else len(model)
-    T = sampler.to_networkx_graph()
+    T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
     cache = minorminer.busclique.busgraph_cache(T,seed=seed)
     return cache.find_clique_embedding(S)
 
 
 def miner_heuristic(model, sampler, seed=None):
     """ Uses minorminer heuristic embedding """
-    S =  model.to_networkx_graph()
-    T = sampler.to_networkx_graph()
+    S =  model.networkx_graph
+    T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
     return minorminer.find_embedding(S,T,random_seed=seed)
 
 
-def harvest_cliques(N, sampler):
+def harvest_cliques(N, sampler, seed=None):
     """ Yields as many embeddings of an N-clique as possible """
-    T = sampler.to_networkx_graph.copy()
-    emb_kwargs = {'seed':seed,'use_cache':False}
-    while emb:=minorminer.busclique.find_clique_embedding(N,T,**emb_kwargs):
+    T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
+    Tcopy = T.copy()
+    e_kwargs = {'seed':seed,'use_cache':False}
+    while emb:=minorminer.busclique.find_clique_embedding(N,Tcopy,**e_kwargs):
         for v,chain in emb.items():
-            T.remove_nodes_from(chain)
+            Tcopy.remove_nodes_from(chain)
         yield emb
 
 def trim_embedding(tgt, emb, src):
