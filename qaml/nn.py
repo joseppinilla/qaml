@@ -1,6 +1,7 @@
 import torch
 import dimod
 import numpy as np
+import networkx as nx
 import torch.nn.functional as F
 
 class EnergyBasedModel(torch.nn.Module):
@@ -11,6 +12,9 @@ class EnergyBasedModel(torch.nn.Module):
     """
     V : int # Visible nodes
     H : int # Hidden nodes
+    vartype : dimod.vartypes.Vartype
+
+    _networkx_graph = None
 
     def __init__(self, V, H, vartype=dimod.BINARY):
         super(EnergyBasedModel, self).__init__()
@@ -38,9 +42,8 @@ class EnergyBasedModel(torch.nn.Module):
 
     def to_networkx_graph(self, node_attribute_name='bias',
                           edge_attribute_name='bias'):
-        import networkx as nx
 
-        EBM = nx.Graph()
+        G = nx.Graph()
         matrix = self.matrix.copy()
         diag = np.diagonal(matrix)
 
@@ -48,13 +51,15 @@ class EnergyBasedModel(torch.nn.Module):
                        'vartype': self.vartype,
                        'subset': 0 if v<self.V else 1})
                         for v, bias in enumerate(diag))
-        EBM.add_nodes_from(linear)
+        G.add_nodes_from(linear)
 
         quadratic = ((u, v, {edge_attribute_name : matrix[u,v],
                              'vartype': self.vartype})
-                             for u,v in zip(*np.triu_indices(len(EBM),1)))
-        EBM.add_edges_from(quadratic)
-        return EBM
+                             for u,v in zip(*np.triu_indices(len(G),1)))
+        G.add_edges_from(quadratic)
+
+        self._networkx_graph = G
+        return self._networkx_graph
 
     def change_vartype(self, vartype):
         if vartype is dimod.SPIN and self.vartype is dimod.BINARY:
@@ -65,6 +70,13 @@ class EnergyBasedModel(torch.nn.Module):
             raise NotImplementedError("Method not implemented.")
         else:
             raise ValueError(f"No match between {vartype} to {self.vartype}")
+
+    @property
+    def networkx_graph(self):
+        if self._networkx_graph is None:
+            return self.to_networkx_graph()
+        else:
+            return self._networkx_graph
 
     def energy(self, visible, hidden):
         # TODO using matrix
@@ -94,8 +106,6 @@ class BoltzmannMachine(EnergyBasedModel):
         V (int): The size of the visible layer.
         H (int): The size of the hidden layer.
     """
-    V : int # Visible nodes
-    H : int # Hidden nodes
 
     def __init__(self, V, H, vartype=dimod.BINARY):
         super(BoltzmannMachine, self).__init__(V,H,vartype)
@@ -120,8 +130,6 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
         V (int): The size of the visible layer.
         H (int): The size of the hidden layer.
     """
-    V : int # Visible nodes
-    H : int # Hidden nodes
 
     def __init__(self, V, H, vartype=dimod.BINARY):
         super(RestrictedBoltzmannMachine, self).__init__(V,H,vartype)
