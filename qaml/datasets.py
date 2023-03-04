@@ -12,8 +12,10 @@ from PIL import Image
 
 class PhaseState(torch.utils.data.Dataset):
     """ Synthetic data points that represent the phase of a 1D state at N
-        spatial points. The '0' phase is accumulated to the left, and the '1'
-        phase is accumulated to the right with at most 1 boundary. Used in [1].
+        spatial points. As seen in [1]. The '0' phase is accumulated to the
+        left, and the '1' phase is accumulated to the right with at most 1
+        boundary.
+
         [1] Srivastava, S., & Sundararaghavan, V. (2020). Machine learning in
             quantum computers via general Boltzmann Machines: Generative and
             Discriminative training through annealing.
@@ -25,7 +27,7 @@ class PhaseState(torch.utils.data.Dataset):
                     [0., 1., 1.],
                     [0., 0., 1.],
                     [0., 0., 0.]]),
-             array([0, 1, 2, 3]))
+             array([[0], [1], [2], [3]]]))
         >>> PhaseState.generate(3,labeled=True)
         >>> (array([[1., 1., 1.],
                     [0., 1., 1.],
@@ -35,14 +37,14 @@ class PhaseState(torch.utils.data.Dataset):
                     [1., 1., 0.],
                     [1., 0., 1.],
                     [1., 0., 0.]]),
-             array([0., 0., 0., 0., 1., 1., 1., 1.]))
+             array([[0.], [0.], [0.], [0.], [1.], [1.], [1.], [1.]]))
 
     Args:
         N (int): Number of spatial points.
 
         labeled (bool): If labeled, 1 boundary phase states have label 1., and
             random states have 0. If false, labels simply index each data point
-            [0,N].
+            [0,N] and no random states are created.
 
     """
 
@@ -87,15 +89,16 @@ class PhaseState(torch.utils.data.Dataset):
     def generate(cls, N, labeled=False, random_seed=42):
         rng = np.random.default_rng(random_seed)
         if not labeled:
-            return np.triu(np.ones((N+1,N),dtype='float32')), np.arange(N+1)
+            data = np.triu(np.ones((N+1,N),dtype='float32'))
+            labels = np.atleast_2d(np.arange(N+1)).T
         else:
             phase = np.triu(np.ones((N+1,N)))
 
             # Random data points
             int_set = set(phase.dot(2**np.arange(phase[0].size)[::-1]))
             R = min(N*3-1, ((2**N)//2))
-            labels = np.asarray(np.concatenate((np.zeros(N+1),np.ones(R))),
-                                dtype='float32')
+            labels = np.atleast_2d(np.concatenate((np.zeros(N+1),np.ones(R)),
+                                   dtype='float32')).T
 
             while i:=0 < R:
                 rand_set = []
@@ -110,9 +113,9 @@ class PhaseState(torch.utils.data.Dataset):
                 return np.asarray(list(np.binary_repr(x).zfill(width)),int)
 
             random = [int2binarray(x,N) for x in rand_set]
-            data = np.asarray(np.concatenate((phase,random)),dtype='float32')
+            data = np.concatenate((phase,random),dtype='float32')
 
-            return data, labels
+        return data, labels
 
     def score(self, samples):
         total_samples = len(samples)
