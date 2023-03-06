@@ -155,7 +155,7 @@ class BAS(torch.utils.data.Dataset):
         >>>     ms = ax.matshow(img[i],vmin=0, vmax=1)
         >>>     ax.axis('off')
     """
-    classes = ['0 - All Zeros', '1 - Bars', '2 - Stripes', '3 - All Ones']
+    classes = ['1 - Bars', '2 - Stripes']
 
     def __init__(self, rows, cols, transform=None, target_transform=None):
         self.data, self.targets = self.generate(rows,cols)
@@ -237,9 +237,9 @@ class BAS(torch.utils.data.Dataset):
         Returns:
             data (numpy.ndarray): Array of (rows,cols) images of BAS dataset
 
-            targets (numpy.ndarray): Array of labels for data. Where the empty
-                (all zeros), bars (vertical lines), stripes (horizontal lines),
-                and full (all ones) images belong to different classes.
+            targets (numpy.ndarray): Array of labels for data.
+                0 for bars (vertical lines),
+                and 1 for stripes (horizontal lines).
 
         Implementation based on DDQCL project for benchmarking generative models
         with shallow gate-level quantum circuits.
@@ -257,15 +257,15 @@ class BAS(torch.utils.data.Dataset):
             pattern = np.repeat([h], cols, 1)
             stripes.append(pattern.reshape(rows,cols))
 
-        data = torch.DoubleTensor(np.concatenate((bars[:-1], #ignore all one
-                                                  stripes[1:]), #ignore all zero
+        # Ignores full/empty
+        data = torch.DoubleTensor(np.concatenate((bars[1:-1],
+                                                  stripes[1:-1]),
                                                   axis=0))
 
         # Create labels synthetically
-        labels  = [0] # All zero
-        labels += [1]*(2**cols-2) # Bars
-        labels += [2]*(2**rows-2) # Stripes
-        labels += [3] # All one
+        labels = [0]*(2**cols-2) # Bars
+        labels += [1]*(2**rows-2) # Stripes
+
         return data, torch.LongTensor(labels)
 
 class OptDigits(torchvision.datasets.vision.VisionDataset):
