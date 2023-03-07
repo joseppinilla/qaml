@@ -62,21 +62,32 @@ class GibbsNetworkSampler(NetworkSampler):
             model (torch.nn.Module): PyTorch `Module` with `forward` method.
             beta (float): inverse temperature for the sampler.
             return_prob (bool, default=True): if True, returns probabilities.
-        Example:
-            >>> gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm)
+        Example for Contrastive Divergence (CD-k):
+            >>> gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
             ...
             >>> # Positive Phase
             >>> v0, prob_h0 = gibbs_sampler(input_data,k=0)
             >>> # Negative Phase
-            >>> vk, prob_hk = gibbs_sampler(k=1)
+            >>> vk, prob_hk = gibbs_sampler(input_data,k)
+
+        Example for Persistent Contrastive Divergence (PCD):
+            >>> gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
+            >>> persistent_sampler = qaml.sampler.GibbsNetworkSampler(rbm,NUM_CHAINS)
+            ...
+            >>> # Positive Phase
+            >>> v0, prob_h0 = gibbs_sampler(input_data,k=0)
+            >>> # Negative Phase
+            >>> vk, prob_hk = persist_sampler(k)
 
     """
 
-    def __init__(self, model, beta=1.0, return_prob=True):
+    def __init__(self, model, num_chains, beta=1.0, return_prob=True):
         if 'Restricted' not in repr(model):
             raise RuntimeError("Not Supported")
         super(GibbsNetworkSampler, self).__init__(model,beta)
         self.return_prob = return_prob
+        self.prob_v.data = torch.rand(num_chains,model.V)
+        self.prob_h.data = torch.rand(num_chains,model.H)
 
     @torch.no_grad()
     def reconstruct(self, input_data, mask=None, k=1):
@@ -97,13 +108,13 @@ class GibbsNetworkSampler(NetworkSampler):
         return prob_v.clone(), prob_h.clone()
 
     @torch.no_grad()
-    def forward(self, init=None, k=1):
+    def forward(self, input_data=None, k=1):
         beta = self.beta
         model = self.model
 
-        if init is not None:
-            self.prob_v.data = init.clone()
-            self.prob_h.data = model.forward(init.clone(),scale=beta)
+        if input_data is not None:
+            self.prob_v.data = input_data.clone()
+            self.prob_h.data = model.forward(input_data.clone(),scale=beta)
 
         for _ in range(k):
             self.prob_v.data = model.generate(self.sample_h(),scale=beta)
@@ -112,47 +123,6 @@ class GibbsNetworkSampler(NetworkSampler):
         if self.return_prob:
             return self.prob_v.clone(), self.prob_h.clone()
         return self.sample_v(), self.sample_h()
-
-class PersistentGibbsNetworkSampler(GibbsNetworkSampler):
-    """ Sampler for k-step Persistent Contrastive Divergence training of RBMs
-
-        Args:
-            model (torch.nn.Module): PyTorch `Module` with `forward` method.
-
-            num_chains (int): PCD keeps N chains at all times.
-
-        Example:
-            >>> persist_sampler = qaml.sampler.PersistentGibbsNetworkSampler(rbm,50)
-            >>> ...
-            >>> # Positive Phase
-            >>> v0, prob_h0 = persist_sampler(input_data,k=0)
-            >>> # Negative Phase
-            >>> vk, prob_hk = persist_sampler(k=5)
-
-    """
-    def __init__(self, model, num_chains, beta=1.0):
-        if 'Restricted' not in repr(model):
-            raise RuntimeError("Not Supported")
-        super(PersistentGibbsNetworkSampler, self).__init__(model,beta)
-        self.prob_v.data = torch.rand(num_chains,model.V)
-        self.prob_h.data = torch.rand(num_chains,model.H)
-
-    @torch.no_grad()
-    def forward(self, init=None, k=1):
-        beta = self.beta
-        model = self.model
-
-        prob_v = self.prob_v if init is None else init.clone()
-        prob_h = self.prob_h if init is None else model.forward(init.clone(),scale=beta)
-
-        for _ in range(k):
-            prob_v.data = self.model.generate(self.sample(prob_h),scale=beta)
-            prob_h.data = self.model.forward(self.sample(prob_v),scale=beta)
-
-        if self.return_prob:
-            return prob_v, prob_h
-        return self.sample(prob_v), self.sample(prob_h)
-
 
 """ The next samplers formulate the model as a Binary Quadratic Model (BQM) """
 class BinaryQuadraticModelSampler(NetworkSampler):
