@@ -211,18 +211,19 @@ class SimulatedAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
     def __init__(self, model, beta=1.0, **kwargs):
         BinaryQuadraticModelSampler.__init__(self,model,beta)
-        self.sampler = dimod.SimulatedAnnealingSampler(**kwargs)
+        self.child = dimod.SimulatedAnnealingSampler(**kwargs)
 
-    def forward(self, input_data=None, num_reads=100, **kwargs):
-        bqm = self.to_bqm(input_data)
+    def forward(self, input_data=[], num_reads=100, **kwargs):
+        fixed_vars = {i:v.item() for i,v in enumerate(input_data)}
+        bqm = self.to_bqm(fixed_vars)
         bqm.scale(float(self.beta))
         sa_kwargs = {**self.sa_kwargs,**kwargs}
-        sampleset = self.sampler.sample(bqm,num_reads=num_reads,**sa_kwargs)
+        sampleset = self.child.sample(bqm,num_reads=num_reads,**sa_kwargs)
         samples = sampleset.record.sample.copy()
         sampletensor = torch.tensor(samples,dtype=torch.float32)
         self.sampleset = sampleset
 
-        if input_data is None:
+        if input_data == []:
             return sampletensor.split([self.model.V,self.model.H],1)
         else:
             return input_data.expand(num_reads,self.model.V), sampletensor

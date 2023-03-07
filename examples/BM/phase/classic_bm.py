@@ -56,8 +56,6 @@ optimizer = torch.optim.SGD(bm.parameters(),
                             weight_decay=weight_decay,
                             momentum=momentum)
 
-20%10
-
 bm.train()
 p_log = []
 r_log = []

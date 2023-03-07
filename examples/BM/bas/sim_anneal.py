@@ -1,5 +1,6 @@
-# # Classical RBM training on the Bars-And-Stripes Dataset for Reconstruction
-# This is an example on classical Gibbs training of an RBM on the BAS(8,8)
+# # Classical BM training on the Bars-And-Stripes Dataset for Reconstruction
+# This is an example on classical Simulated Annealing training of an BM on the
+# BAS(4,4)
 # dataset.
 # Developed by: Jose Pinilla
 
@@ -12,10 +13,10 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-M,N = SHAPE = (8,8)
+M,N = SHAPE = (4,4)
 DATA_SIZE = N*M
 EPOCHS = 35
-BATCH_SIZE = 64
+# BATCH_SIZE = 64
 SUBCLASSES = [1,2]
 
 # Stochastic Gradient Descent
@@ -30,64 +31,59 @@ set_label,get_label = qaml.datasets._embed_labels(train_dataset,
                                                   setter_getter=True)
 qaml.datasets._subset_classes(train_dataset,SUBCLASSES)
 train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
-train_loader = torch.utils.data.DataLoader(train_dataset,BATCH_SIZE,sampler=train_sampler)
+train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler)
 
 # PLot all data
-fig,axs = plt.subplots(8,8)
-for img_batch,labels_batch in train_loader:
-    for ax,img,label in zip(axs.flat,img_batch,labels_batch):
-        ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
-    break
+fig,axs = plt.subplots(4,4)
+for ax,(img,label) in zip(axs.flat,train_loader):
+    ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
 plt.tight_layout()
 
 ################################# Model Definition #############################
 VISIBLE_SIZE = DATA_SIZE
-HIDDEN_SIZE = 64
+HIDDEN_SIZE = 4
 
 # Specify model with dimensions
-rbm = qaml.nn.RBM(VISIBLE_SIZE, HIDDEN_SIZE, 'SPIN')
+bm = qaml.nn.BM(VISIBLE_SIZE, HIDDEN_SIZE, 'SPIN')
 
 # Initialize biases
-_ = torch.nn.init.constant_(rbm.b,0.1)
-_ = torch.nn.init.zeros_(rbm.c)
-_ = torch.nn.init.uniform_(rbm.W,-0.1,0.1)
+_ = torch.nn.init.constant_(bm.b,0.1)
+_ = torch.nn.init.zeros_(bm.c)
+_ = torch.nn.init.uniform_(bm.W,-0.1,0.1)
 
 # Set up optimizer
-optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
+optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
-gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
-CD = qaml.autograd.ContrastiveDivergence
+sa_sampler = qaml.sampler.SimulatedAnnealingNetworkSampler(bm)
+ML = qaml.autograd.MaximumLikelihood
 
-# NUM_CHAINS = 100
-# persist_sampler = qaml.sampler.GibbsNetworkSampler(rbm,NUM_CHAINS)
-
+%%time
 ################################## Model Training ##############################
 # Set the model to training mode
-rbm.train()
+bm.train()
 p_log = []
 r_log = []
 err_log = []
 score_log = []
 kl_div_log = []
-b_log = [rbm.b.detach().clone().numpy()]
-c_log = [rbm.c.detach().clone().numpy()]
-W_log = [rbm.W.detach().clone().numpy().flatten()]
+b_log = [bm.b.detach().clone().numpy()]
+c_log = [bm.c.detach().clone().numpy()]
+W_log = [bm.W.detach().clone().numpy().flatten()]
 for t in range(35):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
-        input_data = img_batch.flatten(1)
+        input_data = img_batch.flatten()
 
         # Positive Phase
-        v0, p_h0 = gibbs_sampler(input_data.detach(), k=0)
+        v0, h0 = sa_sampler(input_data.detach(),num_reads=10)
         # Negative Phase
-        p_vk, p_hk = gibbs_sampler(v0.detach(),k=1)
-        # p_vk, p_hk = persist_sampler(k=5)
+        vk, hk = sa_sampler(num_reads=10)
 
         # Reconstruction error from Contrastive Divergence
-        err = CD.apply(gibbs_sampler,(v0,p_h0),(p_vk,p_hk), *rbm.parameters())
+        err = ML.apply(sa_sampler,(v0,h0),(vk,hk), *bm.parameters())
 
         # Do not accumulate gradients
         optimizer.zero_grad()
@@ -100,25 +96,20 @@ for t in range(35):
 
         #Accumulate error for this epoch
         epoch_error  += err
-        vk = gibbs_sampler.sample(p_vk)
-        kl_div += qaml.perf.free_energy_smooth_kl(rbm,v0,vk)
 
-    # KL-Divergence
-    kl_div_log.append(kl_div.item())
-    print(f"Epoch {t} KL-Divergence = {kl_div.item()}")
     # Error Log
-    b_log.append(rbm.b.detach().clone().numpy())
-    c_log.append(rbm.c.detach().clone().numpy())
-    W_log.append(rbm.W.detach().clone().numpy().flatten())
+    b_log.append(bm.b.detach().clone().numpy())
+    c_log.append(bm.c.detach().clone().numpy())
+    W_log.append(bm.W.detach().clone().numpy().flatten())
     err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
     # BAS score
-    precision, recall, score = train_dataset.score(p_vk.bernoulli().view(-1,*SHAPE))
+    precision, recall, score = train_dataset.score(((vk+1)/2).view(-1,*SHAPE))
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
 # Set the model to evaluation mode
-# rbm.eval()
+# bm.eval()
 
 ################################## Sampling ####################################
 num_samples = 1000
