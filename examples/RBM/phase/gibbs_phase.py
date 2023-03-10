@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-EPOCHS = 1
+EPOCHS = 50
 DATA_SIZE = 10
 LABEL_SIZE = 1
 VISIBLE_SIZE = DATA_SIZE + LABEL_SIZE
@@ -60,7 +60,7 @@ b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
 
-for t in range(50):
+for t in range(EPOCHS):
     stack_vk = None
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
@@ -129,20 +129,17 @@ ax.plot(p_log)
 plt.ylabel("Precision")
 plt.xlabel("Epoch")
 
-
 # Recall graph
 fig, ax = plt.subplots()
 ax.plot(r_log)
 plt.ylabel("Recall")
 plt.xlabel("Epoch")
 
-
 # Score graph
 fig, ax = plt.subplots()
 ax.plot(score_log)
 plt.ylabel("Score")
 plt.xlabel("Epoch")
-
 
 # L1 error graph
 fig, ax = plt.subplots()

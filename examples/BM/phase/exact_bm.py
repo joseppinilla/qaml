@@ -10,13 +10,13 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-EPOCHS = 1
-DATA_SIZE = 10
+EPOCHS = 30
+DATA_SIZE = 8
 LABEL_SIZE = 1
 VISIBLE_SIZE = DATA_SIZE + LABEL_SIZE
 HIDDEN_SIZE = 8
 # Stochastic Gradient Descent
-learning_rate = 0.1
+learning_rate = 0.01
 weight_decay = 1e-4
 momentum = 0.5
 
@@ -68,17 +68,21 @@ vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 W_log = [bm.W.detach().clone().numpy().flatten()]
 
-for t in range(5):
+for t in range(EPOCHS):
     stack_vk = None
     epoch_error = torch.Tensor([0.])
     for train_data, train_label in train_loader:
 
         input_data = torch.cat((train_data,train_label),axis=1)
         # Positive Phase
-        v0, h0 = pos_sampler(input_data.flatten(),num_reads=None)
-        # Negative Phase
-        vk, hk = neg_sampler(num_reads=None)
+        # v0, p_h0 = pos_sampler(input_data.flatten(),num_reads=None)
+        v0, h0 = pos_sampler(input_data.flatten(),num_reads=10)
 
+        # Negative Phase
+        # p_vk, p_hk = neg_sampler(num_reads=None)
+        vk, hk = neg_sampler(num_reads=10)
+
+        # err = ML.apply(neg_sampler,(v0,p_h0),(p_vk,p_hk),*bm.parameters())
         err = ML.apply(neg_sampler,(v0,h0),(vk,hk),*bm.parameters())
         optimizer.zero_grad()
 
@@ -91,6 +95,7 @@ for t in range(5):
         err_log.append(err.item())
 
         # For full score
+        # vk = neg_sampler.sample(p_vk)
         stack_vk = vk if stack_vk is None else torch.cat([stack_vk,vk],dim=0)
 
     # Parameter log
@@ -107,11 +112,6 @@ for t in range(5):
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-v0
-h0
-
-vk
-hk
 
 torch.save(err_log,f'err_log_{num_reads}.pt')
 torch.save(p_log,f'p_log_{num_reads}.pt')
@@ -132,20 +132,17 @@ ax.plot(p_log)
 plt.ylabel("Precision")
 plt.xlabel("Epoch")
 
-
 # Recall graph
 fig, ax = plt.subplots()
 ax.plot(r_log)
 plt.ylabel("Recall")
 plt.xlabel("Epoch")
 
-
 # Score graph
 fig, ax = plt.subplots()
 ax.plot(score_log)
 plt.ylabel("Score")
 plt.xlabel("Epoch")
-
 
 # L1 error graph
 fig, ax = plt.subplots()
