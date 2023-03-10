@@ -44,12 +44,8 @@ _ = torch.nn.init.uniform_(bm.vv,-1.0,1.0)
 _ = torch.nn.init.uniform_(bm.hh,-1.0,1.0)
 _ = torch.nn.init.uniform_(bm.W,-1.0,1.0)
 
-
-# sa_sampler = qaml.sampler.SimulatedAnnealingNetworkSampler(bm)
-
 pos_sampler = qaml.sampler.ExactNetworkSampler(bm)
 neg_sampler = qaml.sampler.ExactNetworkSampler(bm)
-
 
 ML = qaml.autograd.MaximumLikelihood
 
@@ -112,13 +108,11 @@ for t in range(EPOCHS):
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-
 torch.save(err_log,f'err_log_{num_reads}.pt')
 torch.save(p_log,f'p_log_{num_reads}.pt')
 torch.save(r_log,f'r_log_{num_reads}.pt')
 torch.save(score_log,f'score_log_{num_reads}.pt')
 torch.save(epoch_err_log,f'epoch_err_log_{num_reads}.pt')
-
 
 # Iteration Error
 fig, ax = plt.subplots()
