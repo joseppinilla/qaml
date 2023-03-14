@@ -3,38 +3,50 @@ import numpy as np
 import networkx as nx
 import dwave.embedding
 
-
-def biclique_from_cache(model, sampler, seed=None):
+def biclique_from_cache(model, sampler, mask=[], seed=None):
     """ Fetches the biclique embedding of the model onto the sampler """
+    V = np.ma.masked_array(model.visible,mask=mask).compressed()
+    H = model.hidden
     T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
     cache = minorminer.busclique.busgraph_cache(T,seed=seed)
-    return cache.find_biclique_embedding(model.V,model.H)
+    return cache.find_biclique_embedding(V.tolist(),H.tolist())
 
 
-def clique_from_cache(model, sampler, seed=None):
+def clique_from_cache(model, sampler, mask=[], seed=None):
     """ Fetches the clique embedding of the model onto the sampler """
-    S = model if isinstance(model,int) else len(model)
+    V = np.ma.masked_array(model.visible,mask=mask).compressed()
+    H = model.hidden
     T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
     cache = minorminer.busclique.busgraph_cache(T,seed=seed)
-    return cache.find_clique_embedding(S)
+    return cache.find_clique_embedding(V.tolist() + H.tolist())
 
 
-def miner_heuristic(model, sampler, seed=None):
+def miner_heuristic(model, sampler, mask=[], seed=None):
     """ Uses minorminer heuristic embedding """
-    S =  model.networkx_graph
+    S = model if isinstance(sampler,nx.Graph) else model.to_networkx_graph()
+    fixed_vars = np.ma.masked_array(model.visible,mask=np.logical_not(mask)).compressed()
+    S.remove_nodes_from(fixed_vars)
     T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
     return minorminer.find_embedding(S,T,random_seed=seed)
 
 
-def harvest_cliques(N, sampler, seed=None):
-    """ Yields as many embeddings of an N-clique as possible """
+def harvest_cliques(model, sampler, mask=[], seed=None):
+    """ Yields embeddings of an N-clique while found.
+        Note: This method doesn't guarantee a maximum number of cliques nor that
+        no other embeddings exist.
+    """
+    V = np.ma.masked_array(model.visible,mask=mask).compressed()
+    H = model.hidden
+    nodes = V.tolist() + H.tolist()
     T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
-    Tcopy = T.copy()
+    Tg = T.copy()
     e_kwargs = {'seed':seed,'use_cache':False}
-    while emb:=minorminer.busclique.find_clique_embedding(N,Tcopy,**e_kwargs):
+    while emb:=minorminer.busclique.find_clique_embedding(nodes,Tg,**e_kwargs):
         for v,chain in emb.items():
-            Tcopy.remove_nodes_from(chain)
+            Tg.remove_nodes_from(chain)
         yield emb
+
+################################# MODIFIERS ####################################
 
 def trim_embedding(tgt, emb, src):
     """ This method takes in a target device graph, a minor-embeding and the

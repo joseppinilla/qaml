@@ -10,8 +10,8 @@ class EnergyBasedModel(torch.nn.Module):
         V (int): The size of the visible layer.
         H (int): The size of the hidden layer.
     """
-    V : int # Visible nodes
-    H : int # Hidden nodes
+    V : int # Number of Visible nodes
+    H : int # Number of Hidden nodes
     vartype : dimod.vartypes.Vartype
 
     _networkx_graph = None
@@ -91,6 +91,14 @@ class EnergyBasedModel(torch.nn.Module):
 
     def forward(self, visible):
         raise NotImplementedError("This model doesn't support forward()")
+
+    @property
+    def visible(self):
+        return torch.arange(self.V)
+
+    @property
+    def hidden(self):
+        return torch.arange(self.H) + self.V
 
     def __len__(self):
         return self.V + self.H

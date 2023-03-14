@@ -336,7 +336,7 @@ class ExactEmbeddedNetworkSampler(ExactNetworkSampler):
 
 class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
-    sample_kwargs = {"annealing_time":20.0,"label":"QARBM-DEV"}
+    sample_kwargs = {"annealing_time":20.0,"label":"QAML"}
 
     embed_kwargs = {"chain_strength":1.6}
 
@@ -346,11 +346,12 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
     scalar = 1.0
     embedding = None
     auto_scale = True
+
     batch_mode = False
     batch_embeddings = None
 
     def __init__(self, model, embedding=None, beta=1.0, auto_scale=True,
-                 chain_imbalance=0, failover=False, retry_interval=-1,
+                 chain_imbalance=0, failover=False, retry_interval=-1, mask=[],
                  batch_mode=False, **conf):
         BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
 
@@ -361,13 +362,10 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         if embedding is None:
             embedding = qaml.minor.clique_from_cache(model,self)
             assert embedding, "Embedding not found"
-
-        if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
-            embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
-        self.embedding = embedding
+        self.embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
 
         if batch_mode:
-            embeddings = qaml.minor.harvest_cliques(model.H,self)
+            embeddings = qaml.minor.harvest_cliques(model,self,mask)
             self.batch_embeddings = [{model.V+v:chain for v,chain in emb.items()} for emb in embeddings]
             self.batch_mode = len(self.batch_embeddings)
 
@@ -426,19 +424,12 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
             ising = dimod.BinaryQuadraticModel.empty(self.model.vartype)
             combined_emb = {}
             for i,(bqm,emb) in enumerate(zip(batch_bqms,batch_embs)):
-                print(f"Batch {i}")
                 labels = {v:v+(i*len(bqm)) for v in bqm.variables}
-                print(labels)
                 emb_i = {v+(i*len(bqm)):chain for v,chain in emb.items()}
-                print(emb_i)
                 combined_emb.update(emb_i)
-                print(combined_emb)
                 relabeled = bqm.relabel_variables(labels,inplace=False)
-                print(relabeled)
                 ising.update(relabeled)
-                print(ising.linear)
             embedding = dwave.embedding.EmbeddedStructure(edgelist,combined_emb)
-            print(embedding)
         else:
             raise ValueError(f'Input ({num_inputs}) != batch ({batch_size})')
 
@@ -490,13 +481,13 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         if num_inputs == 0:
             self.sampleset = samples # (num_reads,V+H)
         elif num_inputs == 1:
-            fixed, _ = dimod.as_samples(fixed_vars) # (1,V) -> (num_reads,V)
+            fixed, _ = dimod.as_samples(fixed_vars) # (1,FIXED) -> (num_reads,FIXED)
             self.sampleset = np.hstack((np.repeat(fixed,num_reads,0),samples))
         elif num_inputs <= batch_size:
-            split_samples = np.split(samples,len(batch_bqms),axis=1) # [(num_reads,H)*BATCH_SIZE]
-            mean_samples = np.mean(split_samples,axis=1) #(BATCH_SIZE,H)
+            split_samples = np.split(samples,len(batch_bqms),axis=1) # [(num_reads,VARS)*BATCH_SIZE]
+            mean_samples = np.mean(split_samples,axis=1) #(BATCH_SIZE,VARS)
 
-            fixed = [f for f,_ in map(dimod.as_samples,fixed_vars)] #(BATCH_SIZE,V)
+            fixed = [f for f,_ in map(dimod.as_samples,fixed_vars)] #(BATCH_SIZE,FIXED)
             self.sampleset = np.hstack((np.concatenate(fixed),mean_samples))
 
         sampletensor = torch.tensor(self.sampleset,dtype=torch.float32)
@@ -518,32 +509,39 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
 QASampler = QuantumAnnealingNetworkSampler
 
-class BatchQuantumAnnealingNetworkSampler(QASampler):
+class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
     """ Sample from multiple versions of the same networks """
 
     batches = None
     batch_embeddings = None
 
-    def __init__(self, model, embedding=None, mask=None, beta=1.0,
-                 failover=False, retry_interval=-1, **config):
-        QASampler.__init__(self,model,{},beta,failover,retry_interval,**config)
+    def __init__(self, model, batch_embeddings=None, beta=1.0, auto_scale=True,
+                 chain_imbalance=0, failover=False, retry_interval=-1, **conf):
+        BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
 
-        model = self.model
-        target = self.networkx_graph
-        self.batch_embeddings = qaml.minor.harvest_cliques(model.H,target)
-        self.batches = len(self.batch_embeddings)
-        self.embedding = self.embed_batch(self.batch_embeddings)
+        self.device = dwave.system.DWaveSampler(failover,retry_interval,**conf)
+        target = self.to_networkx_graph()
+        self.auto_scale = auto_scale
+
+        if batch_embeddings is None:
+            batch_embeddings = list(qaml.minor.harvest_cliques(model.H,target))
+            assert batch_embeddings, "Embedding not found"
+        batch_embeddings = [dwave.embedding.EmbeddedStructure(target.edges, emb)
+                            for emb in batch_embeddings]
+
+        self.batches = len(batch_embeddings)
+        self.batch_embeddings =  list(batch_embeddings)
+        self.embedding = self.embed_batch()
 
     def embed_batch(self):
 
-        edgelist = self.networkx_graph.edges
         combined_emb = {}
-        for i,embedding in enumerate(self.batch_embeddings):
-            emb_i = {v+(i*len(bqm)):chain for v,chain in embedding.items()}
+        for i,emb in enumerate(self.batch_embeddings):
+            emb_i = {v+(i*len(emb)):chain for v,chain in emb.items()}
             combined_emb.update(emb_i)
-        embedding = dwave.embedding.EmbeddedStructure(edgelist,combined_emb)
 
-        return embedding
+        edgelist = self.networkx_graph.edges
+        return dwave.embedding.EmbeddedStructure(edgelist,combined_emb)
 
     def to_batch_ising(self,fixed_vars):
 
@@ -619,6 +617,15 @@ class BatchQuantumAnnealingNetworkSampler(QASampler):
 
         sampletensor = torch.tensor(self.sampleset,dtype=torch.float32)
         return sampletensor.split([self.model.V,self.model.H],1)
+
+    def forward(self, input_data=[], num_reads=100,
+                embed_kwargs={}, unembed_kwargs={}, **kwargs):
+
+        kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
+        fixed_vars = [{i:v.item() for i,v in enumerate(d)} for d in input_data]
+        return self.sample_bm(fixed_vars,embed_kwargs,unembed_kwargs,**kwargs)
+
+BatchQASampler = BatchQuantumAnnealingNetworkSampler
 
 class AdachiQASampler(QASampler):
     """ Prune (currently unpruned) units in a tensor from D-Wave graph using the
