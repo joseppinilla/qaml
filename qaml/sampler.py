@@ -365,8 +365,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         self.embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
 
         if batch_mode:
-            embeddings = qaml.minor.harvest_cliques(model,self,mask)
-            self.batch_embeddings = [{model.V+v:chain for v,chain in emb.items()} for emb in embeddings]
+            self.batch_embeddings = list(qaml.minor.harvest_cliques(model,self,mask))
             self.batch_mode = len(self.batch_embeddings)
 
     @classmethod
@@ -410,11 +409,14 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
         batch_size = self.batch_mode
         edgelist = self._networkx_graph.edges
         if num_inputs == 0:
+            print("No input")
             ising = self.to_ising()
             embedding = self.embedding
+            num_variables = len(ising)
         elif num_inputs == 1:
             print("Fixed input")
             ising = self.to_ising(*fixed_vars)
+            num_variables = len(ising)
             clamped_emb = {v:self.embedding[v] for v in ising.variables}
             embedding = dwave.embedding.EmbeddedStructure(edgelist,clamped_emb)
         elif num_inputs <= batch_size:
@@ -423,13 +425,15 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
             batch_bqms = [self.to_ising(fix) for fix in fixed_vars]
             ising = dimod.BinaryQuadraticModel.empty(self.model.vartype)
             combined_emb = {}
+            offset = self.model.V + self.model.H
             for i,(bqm,emb) in enumerate(zip(batch_bqms,batch_embs)):
-                labels = {v:v+(i*len(bqm)) for v in bqm.variables}
-                emb_i = {v+(i*len(bqm)):chain for v,chain in emb.items()}
+                labels = {v:v+(i*offset) for v in bqm.variables}
+                emb_i = {v+(i*offset):chain for v,chain in emb.items()}
                 combined_emb.update(emb_i)
                 relabeled = bqm.relabel_variables(labels,inplace=False)
                 ising.update(relabeled)
             embedding = dwave.embedding.EmbeddedStructure(edgelist,combined_emb)
+            num_variables = len(labels)
         else:
             raise ValueError(f'Input ({num_inputs}) != batch ({batch_size})')
 
@@ -477,6 +481,7 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
 
         sampleset = dimod.sampleset.concatenate(responses)
         samples = sampleset.record.sample.copy() # (num_reads,variables)
+        variables = sampleset.variables[:num_variables]
 
         if num_inputs == 0:
             self.sampleset = samples # (num_reads,V+H)
@@ -484,11 +489,23 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelSampler):
             fixed, _ = dimod.as_samples(fixed_vars) # (1,FIXED) -> (num_reads,FIXED)
             self.sampleset = np.hstack((np.repeat(fixed,num_reads,0),samples))
         elif num_inputs <= batch_size:
-            split_samples = np.split(samples,len(batch_bqms),axis=1) # [(num_reads,VARS)*BATCH_SIZE]
+            split_samples = np.split(samples,len(fixed_vars),axis=1) # [(num_reads,VARS)*BATCH_SIZE]
             mean_samples = np.mean(split_samples,axis=1) #(BATCH_SIZE,VARS)
+            # TODO: Only return mean if return_prob?
 
-            fixed = [f for f,_ in map(dimod.as_samples,fixed_vars)] #(BATCH_SIZE,FIXED)
-            self.sampleset = np.hstack((np.concatenate(fixed),mean_samples))
+            concatenate = copy.deepcopy(fixed_vars)
+            for i,(fixed_batch,sample_batch) in enumerate(zip(fixed_vars,mean_samples)):
+                concatenate[i].update({int(k):v for k,v in zip(variables,sample_batch)})
+
+            # sort labels
+            samples,variables = dimod.as_samples(concatenate)
+            reindex, new_variables = zip(*sorted(enumerate(variables),
+                                                     key=lambda tup: tup[1]))
+            if new_variables != variables:
+                    # avoid the copy if possible
+                    samples = samples[:, reindex]
+                    variables = new_variables
+            self.sampleset = samples
 
         sampletensor = torch.tensor(self.sampleset,dtype=torch.float32)
         return sampletensor.split([self.model.V,self.model.H],1)
