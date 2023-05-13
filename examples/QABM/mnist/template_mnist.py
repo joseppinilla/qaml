@@ -10,6 +10,7 @@ import torch
 
 import matplotlib.pyplot as plt
 import torchvision.datasets as torch_datasets
+import torchvision.transforms as torch_transforms
 
 from torch.nn.functional import max_pool2d
 
@@ -23,16 +24,15 @@ learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
-method = "clique"
 batch_mode = True
 solver_name = "Advantage_system6.1"
 
-SEED = 8
+SEED = 5
 torch.manual_seed(SEED)
 
 ################################# Model Definition #############################
 VISIBLE_SIZE = DATA_SIZE
-HIDDEN_SIZE = 6
+HIDDEN_SIZE = 7
 
 # Specify model with dimensions
 bm = qaml.nn.BoltzmannMachine(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
@@ -54,26 +54,29 @@ optimizer = torch.optim.SGD(bm.parameters(),lr=learning_rate,
                             momentum=momentum)
 
 # Set up training mechanisms
-qa_sampler = qaml.sampler.QASampler(bm,solver=solver_name,batch_mode=batch_mode)
+qa_sampler = qaml.sampler.QASampler(bm,solver=solver_name,batch_mode=batch_mode,mask=True)
 
 # Loss and autograd
 ML = qaml.autograd.MaximumLikelihood
 
+BATCH_SIZE = qa_sampler.batch_mode
 ############################ Dataset and Transformations #######################
 mnist_train = torch_datasets.MNIST(root='./data/', train=True, download=True,
-                                     transform=qaml.datasets.ToSpinTensor())
-mnist_train.data = max_pool2d(mnist_train.data.float(),(2,2),padding=-1).byte()
+                                   transform=qaml.datasets.ToSpinTensor())
+
+mnist_train.data = torch_transforms.functional.crop(mnist_train.data.float(),1,1,26,26).byte()
+mnist_train.data = max_pool2d(mnist_train.data.float(),(2,2)).byte()
 qaml.datasets._embed_labels(mnist_train,axis=1,encoding='one_hot',scale=255)
-BATCH_SIZE = qa_sampler.batch_mode
-train_loader = torch.utils.data.DataLoader(mnist_train,batch_size=BATCH_SIZE)
+
+train_loader = torch.utils.data.DataLoader(mnist_train, batch_size=BATCH_SIZE)
 
 mnist_test = torch_datasets.MNIST(root='./data/', train=False, download=True,
                                   transform=qaml.datasets.ToSpinTensor())
-mnist_test.data = max_pool2d(mnist_test.data.float(),(2,2),padding=-1).byte()
-set_label,get_label = qaml.datasets._embed_labels(mnist_test,encoding='one_hot',
-                                                 scale=255,setter_getter=True)
+mnist_test.data = torch_transforms.functional.crop(mnist_test.data.float(),1,1,26,26).byte()
+mnist_test.data = max_pool2d(mnist_test.data.float(),(2,2)).byte()
+set_label, get_labe = qaml.datasets._embed_labels(mnist_test,encoding='one_hot',
+                                                  scale=255,setter_getter=True)
 test_loader = torch.utils.data.DataLoader(mnist_test)
-
 
 # Visualize
 fig,axs = plt.subplots(4,5)
@@ -82,6 +85,13 @@ for ax,(img,label) in zip(axs.flat,test_loader):
     ax.set_title(int(label))
     ax.axis('off')
 plt.tight_layout()
+
+len(mnist_train.data)
+
+for img,target in train_loader:
+    break
+len(train_loader)
+img.shape
 
 ################################## Training Log ################################
 

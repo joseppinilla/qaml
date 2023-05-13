@@ -39,18 +39,20 @@ solver_name = "Advantage_system4.1"
 ############################ Dataset and Transformations #######################
 mnist_train = torch_datasets.MNIST(root='./data/', train=True, download=True,
                                    transform=qaml.datasets.ToSpinTensor())
-mnist_train.data = max_pool2d(mnist_train.data.float(),(2,2),padding=-1).byte()
+
+mnist_train.data = torch_transforms.functional.crop(mnist_train.data.float(),1,1,26,26).byte()
+mnist_train.data = max_pool2d(mnist_train.data.float(),(2,2)).byte()
 qaml.datasets._embed_labels(mnist_train,axis=1,encoding='one_hot',scale=255)
 
 train_loader = torch.utils.data.DataLoader(mnist_train, batch_size=BATCH_SIZE)
 
 mnist_test = torch_datasets.MNIST(root='./data/', train=False, download=True,
                                   transform=qaml.datasets.ToSpinTensor())
-mnist_test.data = max_pool2d(mnist_test.data.float(),(2,2),padding=-1).byte()
+mnist_test.data = torch_transforms.functional.crop(mnist_test.data.float(),1,1,26,26).byte()
+mnist_test.data = max_pool2d(mnist_test.data.float(),(2,2)).byte()
 set_label, get_labe = qaml.datasets._embed_labels(mnist_test,encoding='one_hot',
                                                   scale=255,setter_getter=True)
 test_loader = torch.utils.data.DataLoader(mnist_test)
-
 
 # Visualize
 fig, axs = plt.subplots(4, 5)

@@ -43,14 +43,62 @@ _ = torch.nn.init.uniform_(bm.W,-1.0,1.0)
 # torch.nn.utils.prune.random_unstructured(bm,'vv',0.2)
 # torch.nn.utils.prune.random_unstructured(bm,'hh',0.2)
 
+import numpy as np
+
+rbm = qaml.nn.RestrictedBoltzmannMachine(3,4,'SPIN')
+bas_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
+set_label,get_label = qaml.datasets._embed_labels(bas_dataset,setter_getter=True)
+
+mask = set_label(torch.ones(1,*SHAPE),0).flatten()
+
+mask
+
+
+
+solver_name = "Advantage_system6.1"
+sampler = qaml.sampler.QASampler.get_sampler(solver=solver_name)
+
+embeddings = qaml.minor.harvest_cliques(bm,sampler,mask)
+list(embeddings)
+
+embedding = qaml.minor.biclique_from_cache(bm,sampler,mask)
+embedding
+
+embedding = qaml.minor.clique_from_cache(bm,sampler,mask)
+embedding
+
+embedding = qaml.minor.miner_heuristic(bm,sampler,mask=mask)
+embedding
+
 # Set up optimizers
 optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
 solver_name = "Advantage_system6.1"
+
+
+qa_sampler = qaml.sampler.QASampler(bm,solver=solver_name,batch_mode=True)
+
+pos_emb = qaml.minor.clique_from_cache()
+pos_sampler = qaml.sampler.BatchQASampler(bm,solver=solver_name)
+
 neg_sampler = qaml.sampler.QASampler(bm,solver=solver_name)
-pos_sampler = qaml.sampler.QASampler(bm,solver=solver_name,batch_mode=True,mask=True)
+
+recon_emb = qaml.minor.
+recon_sampler = qaml.sampler.BatchQASampler(bm,fixed_vars=,solver=solver_name)
+
+
+import numpy as np
+A = np.asarray([1,0,1,0])
+
+idx = A.nonzero()
+
+idx[]
+
+np.nonzero
+
+neg_sampler =
 
 # Loss and autograd
 ML = qaml.autograd.MaximumLikelihood
@@ -60,28 +108,19 @@ bas_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
 set_label,get_label = qaml.datasets._embed_labels(bas_dataset,setter_getter=True)
 train_dataset,test_dataset = torch.utils.data.random_split(bas_dataset,[*SPLIT])
 
-BATCH_SIZE = pos_sampler.batch_mode
-train_sampler = torch.utils.data.RandomSampler(train_dataset,False)
+BATCH_SIZE = qa_sampler.batch_mode
+train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
 train_loader = torch.utils.data.DataLoader(train_dataset,BATCH_SIZE,sampler=train_sampler)
 
-# Reconstruction sampler from label
-mask = set_label(torch.ones(1,*SHAPE),0).flatten()
-recon_sampler = qaml.sampler.QASampler(bm,solver=solver_name,batch_mode=True,mask=mask)
-
-RECON_SIZE = recon_sampler.batch_mode
-TEST_SAMPLES = RECON_SIZE * (len(test_dataset)//RECON_SIZE)
 test_sampler = torch.utils.data.RandomSampler(test_dataset,False,TEST_SAMPLES)
-test_loader = torch.utils.data.DataLoader(test_dataset,RECON_SIZE,sampler=test_sampler)
-
-len(train_dataset)
+test_loader = torch.utils.data.DataLoader(test_dataset,sampler=test_sampler)
 
 # Visualize
 fig,axs = plt.subplots(4,5)
-for img_batch,labels_batch in test_loader:
-    for ax,img,label in zip(axs.flat,img_batch,labels_batch):
-        ax.matshow(img.squeeze())
-        ax.set_title(int(label))
-        ax.axis('off')
+for ax,(img,label) in zip(axs.flat,test_loader):
+    ax.matshow(img.squeeze())
+    ax.set_title(int(label))
+    ax.axis('off')
 plt.tight_layout()
 
 ################################## Model Training ##############################
@@ -98,18 +137,18 @@ c_log = [bm.c.detach().clone().numpy()]
 vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 W_log = [bm.W.detach().clone().numpy().flatten()]
-for t in range(1):
+for t in range(5):
     epoch_error = 0
 
     for img_batch, labels_batch in train_loader:
-        # Positive Phase
-        v0, h0 = pos_sampler(img_batch.flatten(1),num_reads=100)
 
+        # Positive Phase
+        v0, h0 = qa_sampler(img_batch.flatten(1),num_reads=100)
         # Negative Phase
-        vk, hk = neg_sampler(num_reads=1000,num_spin_reversal_transforms=4)
+        vk, hk = qa_sampler(num_reads=1000,num_spin_reversal_transforms=4)
 
         # Reconstruction error from Contrastive Divergence
-        err = ML.apply(neg_sampler,(v0,h0),(vk,hk),*bm.parameters())
+        err = ML.apply(qa_sampler,(v0,h0),(vk,hk),*bm.parameters())
 
         # Do not accumulate gradients
         optimizer.zero_grad()
@@ -131,98 +170,25 @@ for t in range(1):
         hh_log.append(bm.hh.detach().clone().numpy())
         W_log.append(bm.W.detach().clone().numpy().flatten())
 
-    # Error report
     err_log.append(epoch_error)
     print(f"Epoch {t} Reconstruction Error = {epoch_error}")
-    # Score
-    precision, recall, score = bas_dataset.score(((vk+1)/2).view(-1,*SHAPE))
-    p_log.append(precision); r_log.append(recall); score_log.append(score)
-    print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-    ############################# CLASSIFICATION ##################################
-    count = 0
-    for test_data, test_labels in test_loader:
-        input_data = test_data.flatten(1)
-        mask = set_label(torch.ones(1,*SHAPE),0).flatten()
-        v_batch,h_batch = recon_sampler.reconstruct(input_data,mask=mask,num_reads=5)
-        for v_recon,v_test in zip(v_batch,test_data):
-            label_pred = get_label(v_recon.view(1,*SHAPE))
-            label_test = get_label(v_test.view(1,*SHAPE))
+precision, recall, score = bas_dataset.score(((vk+1)/2).view(-1,*SHAPE))
+p_log.append(precision); r_log.append(recall); score_log.append(score)
+print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-            if (torch.argmax(label_pred) == torch.argmax(label_test)):
-                count+=1
+############################# CLASSIFICATION ##################################
 
-    accuracy_log.append(count/TEST_SAMPLES)
-    print(f"Testing accuracy: {count}/{TEST_SAMPLES} ({count/TEST_SAMPLES:.2f})")
-
-
-directory = f"{HIDDEN_SIZE}_batch{BATCH_SIZE}"
-directory = directory.replace('.','')
-
-
-
-################################ LOAD ##########################################
-%matplotlib qt
-import matplotlib.pyplot as plt
-fig, ax = plt.subplots()
-line = torch.load(f'{directory}/{SEED}/score_log.pt')
-ax.plot(line)
-plt.ylabel("Score")
-plt.xlabel("Epoch")
-
-fig, ax = plt.subplots()
-line = torch.load(f'{directory}/{SEED}/p_log.pt')
-ax.plot(line)
-plt.ylabel("Precision")
-plt.xlabel("Epoch")
-
-fig, ax = plt.subplots()
-line = torch.load(f'{directory}/{SEED}/r_log.pt')
-ax.plot(line)
-plt.ylabel("Recall")
-plt.xlabel("Epoch")
-
-fig, ax = plt.subplots()
-line = torch.load(f'{directory}/{SEED}/batch_err.pt')
-ax.plot(line)
-plt.ylabel("Batch Error")
-plt.xlabel("Epoch")
-
-fig, ax = plt.subplots()
-line = torch.load(f'{directory}/{SEED}/err.pt')
-ax.plot(line)
-plt.ylabel("Epoch Error")
-plt.xlabel("Epoch")
-
-fig, ax = plt.subplots()
-line = torch.load(f'{directory}/{SEED}/accuracy.pt')
-ax.plot(line)
-plt.ylabel("Accuracy")
-plt.xlabel("Epoch")
-
-
-################################ SAVE ##########################################
-
-
-
-
-if not os.path.exists(directory):
-        os.makedirs(directory)
-if not os.path.exists(f'{directory}/{SEED}'):
-        os.makedirs(f'{directory}/{SEED}')
-
-
-torch.save(b_log,f"./{directory}/{SEED}/b.pt")
-torch.save(c_log,f"./{directory}/{SEED}/c.pt")
-torch.save(W_log,f"./{directory}/{SEED}/W.pt")
-torch.save(hh_log,f"./{directory}/{SEED}/hh.pt")
-torch.save(vv_log,f"./{directory}/{SEED}/vv.pt")
-torch.save(err_log,f"./{directory}/{SEED}/err.pt")
-torch.save(batch_err_log,f"./{directory}/{SEED}/batch_err.pt")
-torch.save(accuracy_log,f"./{directory}/{SEED}/accuracy.pt")
-torch.save(p_log,f"./{directory}/{SEED}/p_log.pt")
-torch.save(r_log,f"./{directory}/{SEED}/r_log.pt")
-torch.save(score_log,f"./{directory}/{SEED}/score_log.pt")
+count = 0
+for test_data, test_label in test_loader:
+    input_data = test_data.flatten(1)
+    mask = set_label(torch.ones_like(test_data),0).flatten()
+    v_recon,h_recon = qa_sampler.reconstruct(input_data,mask=mask,num_reads=5)
+    label_pred = get_label(v_recon.view(-1,*SHAPE))
+    if (label_pred.mode(0)[0] == get_label(test_data)).all():
+        count+=1
+accuracy_log.append(count/TEST_SAMPLES)
+print(f"Testing accuracy: {count}/{TEST_SAMPLES} ({count/TEST_SAMPLES:.2f})")
 
 %matplotlib qt
 fig,axs = plt.subplots(10,5)
@@ -231,11 +197,14 @@ for ax,img in zip(axs.flat,vk):
     ax.axis('off')
 plt.tight_layout()
 
-# Accuracy graph
-fig, ax = plt.subplots()
-ax.plot(accuracy_log)
-plt.ylabel("Test Accuracy")
-plt.xlabel("Epoch")
+
+import dwave.preprocessing
+import torch
+import numpy as np
+
+
+
+
 
 # Precision graph
 fig, ax = plt.subplots()

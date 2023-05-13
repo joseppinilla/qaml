@@ -55,7 +55,8 @@ class EnergyBasedModel(torch.nn.Module):
 
         quadratic = ((u, v, {edge_attribute_name : matrix[u,v],
                              'vartype': self.vartype})
-                             for u,v in zip(*np.triu_indices(len(G),1)))
+                             for u,v in zip(*np.triu_indices(len(G),1))
+                             if matrix[u,v]) # TODO: NaN instead of 0? with mask
         G.add_edges_from(quadratic)
 
         self._networkx_graph = G
@@ -86,10 +87,10 @@ class EnergyBasedModel(torch.nn.Module):
         # TODO using matrix
         return
 
-    def generate(self, visible):
+    def generate(self, *args, **kwargs):
         raise NotImplementedError("This model doesn't support generate()")
 
-    def forward(self, visible):
+    def forward(self, *args, **kwargs):
         raise NotImplementedError("This model doesn't support forward()")
 
     @property
@@ -104,18 +105,19 @@ class EnergyBasedModel(torch.nn.Module):
         return self.V + self.H
 
     def __repr__(self):
-        return f'RestrictedBoltzmannMachine({self.V},{self.H})'
+        return f'EnergyBasedModel({self.V},{self.H},{self.vartype.name})'
 
 EBM = EnergyBasedModel
 
 class BoltzmannMachine(EnergyBasedModel):
-    r"""Boltzmann Machine
+    r"""A Boltzmann Machine with full connectivity.
+
     Args:
         V (int): The size of the visible layer.
         H (int): The size of the hidden layer.
     """
 
-    def __init__(self, V, H, vartype=dimod.BINARY):
+    def __init__(self, V, H=0, vartype=dimod.BINARY):
         super(BoltzmannMachine, self).__init__(V,H,vartype)
         # Visible linear bias
         self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
@@ -128,11 +130,19 @@ class BoltzmannMachine(EnergyBasedModel):
         # Visible-Hidden quadratic bias
         self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
 
+    def generate(self, *args, **kwargs):
+        return None
+
+    def forward(self, *args, **kwargs):
+        return None
+
+    def __repr__(self):
+        return f'BoltzmannMachine({self.V},{self.H},{self.vartype.name})'
+
 BM = BoltzmannMachine
 
 class RestrictedBoltzmannMachine(EnergyBasedModel):
-    r"""A Boltzmann Machine with connectivity restricted to only between visible
-    and hidden units.
+    r"""A Boltzmann Machine with restricted connectivity to visible and hidden.
 
     Args:
         V (int): The size of the visible layer.
@@ -234,12 +244,19 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
             data_term = torch.exp(-data_energies).sum().log()
             yield (data_term - model_term).item()
 
+    def __repr__(self):
+        return f'RestrictedBoltzmannMachine({self.V},{self.H},{self.vartype.name})'
+
 RBM = RestrictedBoltzmannMachine
 
 class LimitedBoltzmannMachine(EnergyBasedModel):
-    """ A Boltzmann Machine with added connections between visible-hidden
-    and hidden-hidden units.
+    r"""A Restricted Boltzmann Machine with connectivity between hidden units.
+
+        Args:
+            V (int): The size of the visible layer.
+            H (int): The size of the hidden layer.
     """
+
     def __init__(self, V, H, vartype=dimod.BINARY):
         super(LimitedBoltzmannMachine, self).__init__(V,H,vartype)
         # Visible linear bias
@@ -247,7 +264,7 @@ class LimitedBoltzmannMachine(EnergyBasedModel):
         # Hidden linear bias
         self.c = torch.nn.Parameter(torch.randn(H)*0.1,requires_grad=True)
         # Visible-Visible quadratic bias
-        self.vv = None
+        self.vv = None #TODO: Empty Tensor instead? change in module.matrix
         # Hidden-Hidden quadratic bias
         self.hh = torch.nn.Parameter(torch.randn(H*(H-1)//2)*0.1,requires_grad=True)
         # Visible-Hidden quadratic bias
@@ -259,5 +276,11 @@ class LimitedBoltzmannMachine(EnergyBasedModel):
             return torch.sigmoid(F.linear(hidden,self.W.T,self.b)*scale)
         elif self.vartype is dimod.SPIN:
             return torch.sigmoid(2.0*F.linear(hidden,self.W.T,self.b)*scale)
+
+    def forward(self, *args, **kwargs):
+        return None
+
+    def __repr__(self):
+        return f'LimitedBoltzmannMachine({self.V},{self.H},{self.vartype.name})'
 
 LBM = LimitedBoltzmannMachine

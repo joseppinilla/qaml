@@ -9,7 +9,6 @@ import os
 import qaml
 import torch
 
-# %%
 ################################# Hyperparameters ##############################
 EPOCHS = 75
 M,N = SHAPE = (8,8)
@@ -31,7 +30,6 @@ sampler_kwargs = {'auto_scale':True,'num_spin_reversal_transforms':4}
 SEED = 3
 _ = torch.manual_seed(SEED)
 
-# %%
 #################################### Input Data ################################
 opt_train = qaml.datasets.OptDigits(root='../data/',train=True,download=True,
                                         transform=qaml.datasets.ToSpinTensor())
@@ -47,7 +45,6 @@ qaml.datasets._subset_classes(opt_test,SUBCLASSES)
 set_label,get_label = qaml.datasets._embed_labels(opt_test,encoding='one_hot',
                                                   scale=255,setter_getter=True)
 
-# %%
 ################################# Model Definition #############################
 VISIBLE_SIZE = M*N
 HIDDEN_SIZE = 64
@@ -95,9 +92,8 @@ elif method == 'heuristic':
     qa_sampler = qaml.sampler.QASampler(rbm,{},beta,solver=solver_name)
     qa_sampler.set_embedding(qaml.minor.miner_heuristic(rbm,qa_sampler,SEED))
 
-pos_sampler =  qaml.sampler.GibbsNetworkSampler(rbm)
+pos_sampler =  qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
 
-# %%
 ################################## Training Log ################################
 
 directory = f"{method}/{solver_name}/{SEED}"
@@ -115,7 +111,6 @@ b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy()]
 
-# %%
 ################################## Load Log ################################
 # b_log = torch.load(f"./{directory}/b.pt")
 # c_log = torch.load(f"./{directory}/c.pt")
@@ -129,10 +124,13 @@ W_log = [rbm.W.detach().clone().numpy()]
 # rbm.c.data = torch.tensor(c_log[-1])
 # rbm.W.data = torch.tensor(W_log[-1])
 
-# %%
+qa_sampler.embedding
+
+qa_sampler.embedding_orig
+
 ################################## Model Training ##############################
 rbm.train()
-for t in range(EPOCHS):
+for t in range(1):
     print(f"Epoch {t}")
     epoch_error = torch.Tensor([0.])
     epoch_kl_div = torch.Tensor([0.])
@@ -153,6 +151,8 @@ for t in range(EPOCHS):
 
         # Compute gradients
         err.backward()
+
+        print(rbm.W.grad)
 
         # Update parameters
         optimizer.step()
@@ -185,7 +185,6 @@ for t in range(EPOCHS):
             count+=1
     accuracy_log.append(count/tests)
     print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
-
 
 # %%
 ########################### Save model and results #############################
