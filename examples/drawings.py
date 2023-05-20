@@ -72,3 +72,22 @@ print(len(pruned6) - VISIBLE)
 
 _ = plt.figure(figsize=(16,16))
 nx.draw(pruned6,pos=nx.multipartite_layout(pruned6),node_size=60)
+
+
+figsize = (8,8)
+
+_ = plt.figure(figsize=figsize)
+C = dnx.chimera_graph(3)
+dnx.draw_chimera(C)
+
+_ = plt.figure(figsize=figsize)
+P = dnx.pegasus_graph(3)
+dnx.draw_pegasus(P,crosses=True,node_size=60)
+
+
+_ = plt.figure(figsize=figsize)
+Z = dnx.zephyr_graph(3)
+dnx.draw_zephyr(Z,node_size=40)
+
+
+print(dnx.zephyr_graph.__doc__)
