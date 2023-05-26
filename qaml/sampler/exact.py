@@ -2,16 +2,18 @@ import dimod
 import torch
 import numpy as np
 
-from qaml.sampler.base import BQMSampler
+from qaml.sampler.base import BinaryQuadraticModelNetworkSampler
 
-class ExactNetworkSampler(BQMSampler):
+class ExactNetworkSampler(BinaryQuadraticModelNetworkSampler):
+
+    sample_kwargs = {}
 
     _Z = None
     _energies = None
     _probabilities = None
 
     def __init__(self, model, beta=1.0):
-        BinaryQuadraticModelSampler.__init__(self,model,beta)
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta)
         self.child = dimod.ExactSolver()
 
     @property
@@ -36,16 +38,9 @@ class ExactNetworkSampler(BQMSampler):
             self._Z = np.exp(-beta*energies).sum()
         return self._Z
 
-    @torch.no_grad()
-    def get_sampleset(self,fixed_vars={}):
-        bqm = self.to_bqm(fixed_vars)
-        bqm.scale(float(self.beta))
-        self.sampleset = self.child.sample(bqm)
-        return self.sampleset
-
     def get_energies(self):
         if self.sampleset is None:
-            sampleset = self.get_sampleset()
+            sampleset = self.sample_bm()
         else:
             sampleset = self.sampleset
         energies = sampleset.record['energy']
@@ -62,47 +57,37 @@ class ExactNetworkSampler(BQMSampler):
         self._probabilities = probabilities.to(torch.float32)
         return self._probabilities
 
-    def forward(self, input_data=[], num_reads=None, **ex_kwargs):
-        fixed_vars = {i:v.item() for i,v in enumerate(input_data)}
+    # @torch.no_grad()
+    # def sample_bm(self,fixed_vars={}):
+    #     bqm = self.to_bqm(fixed_vars)
+    #     bqm.scale(float(self.beta))
+    #     sampleset = self.child.sample(bqm)
+    #     return sampleset
 
-        solutions = self.get_sampleset(fixed_vars)
+    def forward(self, input_data=None, num_reads=None, mask=None, **ex_kwargs):
+        # Execute model forward hooks and pre-hooks
+        _ = self.model.forward()
+
+        if mask is None: mask = np.ones(self.model.V)
+
+        if input_data is None:
+            fixed_vars = []
+            self.sampleset = self.sample_bm(fixed_vars)
+        else:
+            num_batches,remainder = divmod(torch.numel(input_data),self.model.V)
+            if num_batches>1: raise RuntimeError("Batches not supported.")
+            if remainder: raise RuntimeError("Invalid input_data shape.")
+            fixed_vars = [{i:v.item() for i,v in enumerate(input_data) if mask[i]}]
+            self.sampleset = self.sample_bm(fixed_vars)[0]
+
         P = self.get_probabilities()
-        Z = self.Z
-
+        samples = np.ascontiguousarray(self.sampleset.record.sample,dtype='float64')
         if num_reads is None:
-            tensorset = torch.Tensor(solutions.record.sample)
+            tensorset = torch.Tensor(samples)
             prob = torch.matmul(torch.Tensor(P),tensorset).unsqueeze(0)
-            if input_data == []:
-                return prob.split([self.model.V,self.model.H],1)
-            else:
-                return input_data.expand(len(prob),self.model.V), prob
-
+            return prob.split([self.model.V,self.model.H],1)
         else:
             idx = torch.multinomial(P,num_reads,replacement=True)
-            samples = solutions.record.sample[idx]
+            samples = samples[idx]
             tensorset = torch.Tensor(samples)
-            if input_data == []:
-                return tensorset.split([self.model.V,self.model.H],1)
-            else:
-                return input_data.expand(num_reads,self.model.V), tensorset
-
-        return vs, hs
-
-
-class ExactEmbeddedNetworkSampler(ExactNetworkSampler):
-
-    embedding = None
-
-    def __init__(self, model, embedding, target_graph, beta=1.0):
-        BinaryQuadraticModelSampler.__init__(self,model,beta)
-
-        self._networkx_graph = target_graph
-        nodes,edges = list(target_graph.nodes), list(target_graph.edges)
-        str_sampler = dimod.StructureComposite(dimod.ExactSolver(),nodes,edges)
-
-        if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
-            edgelist = self.networkx_graph.edges
-            embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
-
-        self.embedding = embedding
-        self.child = dwave.system.FixedEmbeddingComposite(str_sampler,embedding)
+            return tensorset.split([self.model.V,self.model.H],1)

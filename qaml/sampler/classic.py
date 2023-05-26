@@ -1,7 +1,7 @@
 import torch
 import dimod
 
-from qaml.sampler.base import NetworkSampler, BinaryQuadraticModelSampler
+from qaml.sampler.base import NetworkSampler, BinaryQuadraticModelNetworkSampler
 
 __all__ = ['GibbsNetworkSampler',
            'SimulatedAnnealingNetworkSampler', 'SASampler',
@@ -78,20 +78,20 @@ class GibbsNetworkSampler(NetworkSampler):
         return self.sample_v(), self.sample_h()
 
 """ The next samplers formulate the model as a Binary Quadratic Model (BQM) """
-class SimulatedAnnealingNetworkSampler(BinaryQuadraticModelSampler):
+class SimulatedAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
     sample_kwargs = {"num_reads":100, "num_sweeps":1000}
 
     def __init__(self, model, beta=1.0, **kwargs):
-        BinaryQuadraticModelSampler.__init__(self,model,beta)
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta)
         self.child = dimod.SimulatedAnnealingSampler(**kwargs)
 
 SASampler = SimulatedAnnealingNetworkSampler
 
-class BatchSimulatedAnnealingNetworkSampler(BinaryQuadraticModelSampler):
+class BatchSimulatedAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
     sample_kwargs = {"num_reads":100, "num_sweeps":1000}
 
     def __init__(self, model, beta=1.0, **kwargs):
-        BinaryQuadraticModelSampler.__init__(self,model,beta)
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta)
         self.child = dimod.SimulatedAnnealingSampler(**kwargs)
 
 BatchSASampler = BatchSimulatedAnnealingNetworkSampler

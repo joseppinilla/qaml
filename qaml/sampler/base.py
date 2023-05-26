@@ -1,5 +1,6 @@
-import torch
+import copy
 import dimod
+import torch
 import warnings
 
 import numpy as np
@@ -47,7 +48,7 @@ class NetworkSampler(torch.nn.Module):
         prob_h = self.prob_h.clone()
         return self.sample(prob_h)
 
-class BinaryQuadraticModelSampler(NetworkSampler):
+class BinaryQuadraticModelNetworkSampler(NetworkSampler):
     sample_kwargs = {'num_reads':10,'seed':None}
 
     _qubo = None
@@ -58,7 +59,7 @@ class BinaryQuadraticModelSampler(NetworkSampler):
     return_prob = False
 
     def __init__(self, model, beta=1.0):
-        super(BinaryQuadraticModelSampler, self).__init__(model,beta)
+        super(BinaryQuadraticModelNetworkSampler, self).__init__(model,beta)
         self.child = dimod.RandomSampler() # RandomSampler used as placeholder
 
     def to_bqm(self, fixed_vars={}):
@@ -126,67 +127,55 @@ class BinaryQuadraticModelSampler(NetworkSampler):
             return self._networkx_graph
 
     def sample_bm(self, fixed_vars=[], **kwargs):
-        rnd_kwargs = {**self.sample_kwargs,**kwargs}
+        sample_kwargs = {**self.sample_kwargs,**kwargs}
         if len(fixed_vars) == 0:
             bqm = self.to_bqm()
             bqm.scale(float(self.beta))
-            return self.child.sample(bqm,**rnd_kwargs)
+            return self.child.sample(bqm,**sample_kwargs)
+
         else:
+            vartype = self.model.vartype
             samplesets = []
             for fixed in fixed_vars:
                 bqm = self.to_bqm(fixed)
                 bqm.scale(float(self.beta))
-                samplesets.append(self.child.sample(bqm,**rnd_kwargs))
+                sampleset = self.child.sample(bqm,**sample_kwargs)
+                fixed_samples = dimod.SampleSet.from_samples(fixed,vartype,np.nan)
+                samplesets.append(dimod.append_variables(sampleset,fixed_samples))
             return samplesets
 
-
-    def forward(self, input_data=None, **kwargs):
+    def forward(self, input_data=None, mask=None, **kwargs):
         # Execute model forward hooks and pre-hooks
         _ = self.model.forward()
+        # return_prob = False # TODO:
+
+        if mask is None: mask = np.ones(self.model.V)
 
         if input_data is None:
+            self.return_prob = False
             fixed_vars = []
-        else:
-            num_batches,remainder = divmod(torch.numel(input_data),self.model.V)
-            if remainder: raise RuntimeError("Invalid input_data shape.")
-            shaped = input_data.reshape(-1,self.model.V)
-            fixed_vars = [{i:v.item() for i,v in enumerate(d)} for d in shaped]
-
-        self.sampleset = self.sample_bm(fixed_vars,**kwargs)
-
-        if input_data is None:
-            # sample_bm returns a Sampleset
-            return_prob = False
+            self.sampleset = self.sample_bm(fixed_vars,**kwargs)
             samples = self.sampleset.record.sample.copy()
             sampletensor = torch.tensor(samples,dtype=torch.float32)
             return sampletensor.split([self.model.V,self.model.H],1)
-        elif num_batches == 1:
-            # sample_bm returns a list [Sampleset]
-            return_prob = False
-            sampleset = self.sampleset[0]
-            num_reads = len(sampleset)
-            samples = sampleset.record.sample.copy()
-            sampletensor = torch.tensor(samples,dtype=torch.float32)
-            inputtensor = shaped.expand(num_reads,self.model.V)
-            return inputtensor, sampletensor
         else:
-            # sample_bm returns a list of |input_data|*[Sampleset]
-            # each Sampleset has <num_reads> entries
-            return_prob = True
-            inputtensor = input_data.detach().copy()
-            sampletensor = torch.Tensor()
+            self.return_prob = True
+            num_batches,remainder = divmod(torch.numel(input_data),self.model.V)
+            if remainder: raise RuntimeError("Invalid input_data shape.")
+            shaped = input_data.reshape(-1,self.model.V)
+            fixed_vars = [{i:v.item() for i,v in enumerate(d) if mask[i]} for d in shaped]
+            self.sampleset = self.sample_bm(fixed_vars,**kwargs)
+
+            concatenate = np.array([])
             for sampleset in self.sampleset:
-                samples = self.sampleset.record.sample.copy()
-                sampletensor = torch.tensor(samples,dtype=torch.float32)
+                samples = sampleset.record.sample.copy() # (num_reads,variables)
+                mean_samples = np.mean(samples,axis=0)
+                if concatenate.size == 0:
+                    concatenate = mean_samples
+                else:
+                    concatenate = np.vstack(([concatenate,mean_samples]))
 
-            return inputtensor,
+            sampletensor =  torch.tensor(concatenate,dtype=torch.float32)
+            return sampletensor.split([self.model.V,self.model.H],dim=-1)
 
-
-BQMSampler = BinaryQuadraticModelSampler
-
-
-class BatchBinaryQuadraticModelNetworkSampler(BQMSampler):
-    def __init__(self, model, beta=1.0):
-        super(BatchBinaryQuadraticModelSampler, self).__init__(model,beta)
-
-BatchBQMSampler = BatchBinaryQuadraticModelNetworkSampler
+BQMSampler = BinaryQuadraticModelNetworkSampler
