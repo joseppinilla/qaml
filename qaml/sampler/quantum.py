@@ -1,97 +1,136 @@
+import qaml
 import copy
 import dimod
 import torch
 import dwave.system
 import dwave.embedding
+import dwave.preprocessing
 
 import numpy as np
 
-from qaml.minor import clique_from_cache
+from dwave.system import FixedEmbeddingComposite
 from qaml.sampler.base import BinaryQuadraticModelNetworkSampler
+from dwave.preprocessing import ScaleComposite, SpinReversalTransformComposite
+
 
 class QuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
 
-    sample_kwargs = {"annealing_time":20.0,"label":"QAML"}
+    sample_kwargs = {
+        # DWaveSampler
+        "num_reads":10, "annealing_time":20.0, "label":"QAML",
+        "answer_mode":"raw", "auto_scale":False,
+        # ScaleComposite (Default values overwritten by get_device())
+        "bias_range":[-5.0, 5.0], "quadratic_range":[-3.0, 3.0],
+        # FixedEmbeddingComposite
+        "chain_strength":1.6, "chain_break_fraction":False,
+        "chain_break_method":dwave.embedding.chain_breaks.majority_vote,
+        "return_embedding": True,
+        # SpinReversalTransformComposite
+        "num_spin_reversal_transforms":1}
 
-    embed_kwargs = {"chain_strength":1.6}
-
-    unembed_kwargs = {"chain_break_fraction":False,
-                      "chain_break_method":dwave.embedding.chain_breaks.majority_vote}
-
-    scalar = 1.0
     embedding = None
-    auto_scale = True
 
-    def __init__(self, model, embedding=None, beta=1.0, auto_scale=True,
-                 failover=False, retry_interval=-1, mask=[], **conf):
-        BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
+    def __init__(self, model, embedding=None, mask=None, auto_scale=True,
+                 beta=1.0, failover=False, retry_interval=-1,  **conf):
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
-        self.device = dwave.system.DWaveSampler(failover,retry_interval,**conf)
-        target = self.to_networkx_graph()
         self.auto_scale = auto_scale
 
+        self.device = self.get_device(failover,retry_interval,**conf)
+        target = self.to_networkx_graph()
+        edgelist = target.edges
         if embedding is None:
-            embedding = clique_from_cache(model,self,mask)
+            embedding = qaml.minor.clique_from_cache(model,target,mask)
             assert embedding, "Embedding not found"
-        self.embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
+        self.embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
+
+        self.child = SpinReversalTransformComposite(
+                        FixedEmbeddingComposite(
+                            ScaleComposite(self.device),
+                            self.embedding,scale_aware=True))
 
     @classmethod
     def get_device(cls, failover=False, retry_interval=-1, **conf):
-        return dwave.system.DWaveSampler(failover,retry_interval,**conf)
-
-    def set_embedding(self, embedding):
-        if not isinstance(embedding,dwave.embedding.EmbeddedStructure):
-            target = self.networkx_graph
-            embedding = dwave.embedding.EmbeddedStructure(target.edges,embedding)
-        self.embedding = embedding
+        device = dwave.system.DWaveSampler(failover,retry_interval,**conf)
+        cls.sample_kwargs['bias_range'] = device.properties['h_range']
+        cls.sample_kwargs['quadratic_range'] = device.properties['j_range']
+        return device
 
     def to_networkx_graph(self):
         self._networkx_graph = self.device.to_networkx_graph()
         return self._networkx_graph
 
-    def embed_bm(self, ising, embedding=None, flip_variables=[], **embed_kwargs):
 
-        bqm = ising.copy()
-        for v in flip_variables:
-            bqm.flip_variable(v)
+class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
 
-        embedding = self.embedding if embedding is None else embedding
-        target_bqm = embedding.embed_bqm(bqm,**embed_kwargs)
-        ignoring = [e for u in embedding for e in embedding.chain_edges(u)]
-        scale_kwargs = {'ignored_interactions':ignoring}
+    batch_embeddings = None
 
-        if self.auto_scale:
-            # Same function as sampler's auto_scale but retains scalar
-            scale_kwargs.update({'bias_range':self.device.properties['h_range'],
-                               'quadratic_range':self.device.properties['j_range']})
-            self.scalar = target_bqm.normalize(**scale_kwargs)
-        else:
-            target_bqm.scale(1.0/float(self.beta),**scale_kwargs)
-            self.scalar = 1.0
+    def __init__(self, model, batch_embeddings=None, mask=None, auto_scale=True,
+                 beta=1.0, failover=False, retry_interval=-1,  **conf):
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
-        return target_bqm
+        self.auto_scale = auto_scale
 
-    def unembed_sampleset(self, response, embedding, bqm, **kwargs):
+        self.device = self.get_device(failover,retry_interval,**conf)
+        target = self.to_networkx_graph()
+        edgelist = target.edges
+        if batch_embeddings is None:
+            batch_embeddings = list(qaml.minor.harvest_cliques(model,self,mask))
+            assert batch_embeddings, "Embedding not found"
+        self.embedding = self.combine_embeddings(batch_embeddings)
 
-        sampleset = dwave.embedding.unembed_sampleset(response,embedding,bqm,
-                                                      **kwargs)
-        return sampleset
+        self.child = SpinReversalTransformComposite(
+                        FixedEmbeddingComposite(
+                            ScaleComposite(self.device),
+                            self.embedding,scale_aware=True))
 
-    def reconstruct(self, input_data, mask, num_reads=100,
-                    embed_kwargs={}, unembed_kwargs={}, **kwargs):
+        self.batch_embeddings = batch_embeddings
 
-        kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
-        fixed_vars = [{i:v.item() for i,v in enumerate(d) if mask[i]} for d in input_data]
-        return self.sample_bm(fixed_vars,embed_kwargs,unembed_kwargs,**kwargs)
+        def combine_embeddings(self, batch_embeddings):
+            combined_emb = {}
+            offset = len(self.model)
+            for i,emb in enumerate(batch_embeddings):
+                emb_i = {x+(i*offset):chain for x,chain in emb.items()}
+                combined_emb.update(emb_i)
+            edgelist = self.networkx_graph.edges
+            embedding = dwave.embedding.EmbeddedStructure(edgelist,combined_emb)
+            return embedding
 
-    def forward(self, input_data=[], num_reads=100,
-                embed_kwargs={}, unembed_kwargs={}, **kwargs):
+        def combine_bqms(self, fixed_vars):
+            if len(fixed_vars) == 0:
+                ising = self.to_ising()
+                batch_bqms = [ising for _ in self.batch_embeddings]
+            else:
+                batch_bqms = [self.to_ising(fix) for fix in fixed_vars]
 
-        kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
-        fixed_vars = [{i:v.item() for i,v in enumerate(d)} for d in input_data]
-        return self.sample_bm(fixed_vars,embed_kwargs,unembed_kwargs,**kwargs)
+            offset = len(self.model)
+            vartype = self.model.vartype
+            bqm = dimod.BinaryQuadraticModel.empty(vartype)
+            for i,bqm in enumerate(batch_bqms):
+                labels = {x:x+(i*offset) for x in bqm.variables}
+                relabeled = bqm.relabel_variables(labels,inplace=False)
+                bqm.update(relabeled)
+            return bqm
 
-class BatchQuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
+        @property
+        def batch_size(self):
+            return len(self.embedding) if self.embedding else None
+
+        def sample_bm(self, fixed_vars=[], **kwargs):
+            scalar = None if self.auto_scale else self.beta.item()
+            sample_kwargs = {**self.sample_kwargs,**kwargs}
+            bqm = combine_bqms(fixed_vars)
+            response = self.child.sample(bqm,scalar=scalar,**sample_kwargs)
+            response.resolve()
+            sampleset = response.change_vartype(vartype)
+            info = sampleset.info.copy()
+            # (num_reads,VARS*batch_size)
+            samples = sampleset.record.sample.copy()
+            # (num_reads,VARS*batch_size)   ->   (num_reads,VARS)*batch_size
+            split_samples np.split(samples,self.batch_size,axis=1)
+            # TODO: Append fixed variables
+
+class BatchQuantumAnnealingBackUp(BinaryQuadraticModelNetworkSampler):
 
     sample_kwargs = {"annealing_time":20.0,"label":"QAML"}
 
@@ -110,7 +149,7 @@ class BatchQuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
     def __init__(self, model, embedding=None, beta=1.0, auto_scale=True,
                  chain_imbalance=0, failover=False, retry_interval=-1, mask=[],
                  batch_mode=False, **conf):
-        BinaryQuadraticModelSampler.__init__(self,model,beta=beta)
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
         self.device = dwave.system.DWaveSampler(failover,retry_interval,**conf)
         target = self.to_networkx_graph()

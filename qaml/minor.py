@@ -23,8 +23,9 @@ def clique_from_cache(model, sampler, mask=None, seed=None):
     return cache.find_clique_embedding(Vnodes.tolist() + Hnodes.tolist())
 
 
-def miner_heuristic(model, sampler, mask=[], seed=None):
+def miner_heuristic(model, sampler, mask=None, seed=None):
     """ Uses minorminer heuristic embedding """
+    if mask is None: mask = []
     S = model if isinstance(sampler,nx.Graph) else model.to_networkx_graph()
     fixed_vars = [v for v,m in zip(model.visible,mask) if not m]
     S.remove_nodes_from(fixed_vars)

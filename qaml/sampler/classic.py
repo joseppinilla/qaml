@@ -1,11 +1,11 @@
+import neal
 import torch
-import dimod
 
+from dwave.preprocessing import ScaleComposite
 from qaml.sampler.base import NetworkSampler, BinaryQuadraticModelNetworkSampler
 
 __all__ = ['GibbsNetworkSampler',
-           'SimulatedAnnealingNetworkSampler', 'SASampler',
-           'BatchSimulatedAnnealingNetworkSampler', 'BatchSASampler']
+           'SimulatedAnnealingNetworkSampler', 'SASampler']
 
 class GibbsNetworkSampler(NetworkSampler):
     """ Sampler for k-step Contrastive Divergence training of RBMs
@@ -83,15 +83,9 @@ class SimulatedAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
 
     def __init__(self, model, beta=1.0, **kwargs):
         BinaryQuadraticModelNetworkSampler.__init__(self,model,beta)
-        self.child = dimod.SimulatedAnnealingSampler(**kwargs)
+        self.child = ScaleComposite(neal.SimulatedAnnealingSampler(**kwargs))
 
 SASampler = SimulatedAnnealingNetworkSampler
 
-class BatchSimulatedAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
-    sample_kwargs = {"num_reads":100, "num_sweeps":1000}
-
-    def __init__(self, model, beta=1.0, **kwargs):
-        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta)
-        self.child = dimod.SimulatedAnnealingSampler(**kwargs)
-
-BatchSASampler = BatchSimulatedAnnealingNetworkSampler
+#TODO: Parallel version of SimulatedAnnealingSampler. One thread per input.
+# def sample_bm(self, fixed_vars=[], **kwargs):

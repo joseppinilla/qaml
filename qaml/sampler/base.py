@@ -5,6 +5,8 @@ import warnings
 
 import numpy as np
 
+from dwave.preprocessing import ScaleComposite
+
 class NetworkSampler(torch.nn.Module):
     r""" Sample generator for the probabilistic model provided.
     Args:
@@ -49,18 +51,19 @@ class NetworkSampler(torch.nn.Module):
         return self.sample(prob_h)
 
 class BinaryQuadraticModelNetworkSampler(NetworkSampler):
-    sample_kwargs = {'num_reads':10,'seed':None}
+    sample_kwargs = {'num_reads':10, 'seed':None}
 
     _qubo = None
     _ising = None
     _networkx_graph = None
 
     sampleset = None
+    auto_scale = False
     return_prob = False
 
     def __init__(self, model, beta=1.0):
         super(BinaryQuadraticModelNetworkSampler, self).__init__(model,beta)
-        self.child = dimod.RandomSampler() # RandomSampler used as placeholder
+        self.child = ScaleComposite(dimod.RandomSampler())
 
     def to_bqm(self, fixed_vars={}):
         """Obtain the Binary Quadratic Model of the network, from
@@ -126,30 +129,41 @@ class BinaryQuadraticModelNetworkSampler(NetworkSampler):
         else:
             return self._networkx_graph
 
+    @property
+    def alpha(self):
+        if (self.sampleset is None) or (self.auto_scale is False):
+            return 1.0
+        else:
+            if len(self.sampleset) == 1:
+                return self.sampleset.info['scalar']
+            alpha_list = [s.info['scalar'] for s in self.sampleset]
+            alpha_set = set(alpha_list)
+            return alpha_set.pop() if (len(alpha_set)==1) else alpha_list
+
     def sample_bm(self, fixed_vars=[], **kwargs):
+        vartype = self.model.vartype
+        scalar = None if self.auto_scale else self.beta.item()
         sample_kwargs = {**self.sample_kwargs,**kwargs}
         if len(fixed_vars) == 0:
-            bqm = self.to_bqm()
-            bqm.scale(float(self.beta))
-            return self.child.sample(bqm,**sample_kwargs)
-
+            bqm = self.to_ising()
+            response = self.child.sample(bqm,scalar=scalar,**sample_kwargs)
+            response.resolve()
+            sampleset = response.change_vartype(vartype)
+            return sampleset
         else:
-            vartype = self.model.vartype
             samplesets = []
             for fixed in fixed_vars:
-                bqm = self.to_bqm(fixed)
-                bqm.scale(float(self.beta))
-                sampleset = self.child.sample(bqm,**sample_kwargs)
-                fixed_samples = dimod.SampleSet.from_samples(fixed,vartype,np.nan)
-                samplesets.append(dimod.append_variables(sampleset,fixed_samples))
+                bqm = self.to_ising(fixed)
+                response = self.child.sample(bqm,scalar=scalar,**sample_kwargs)
+                response.resolve()
+                sampleset = response.change_vartype(vartype)
+                fix_samples = dimod.SampleSet.from_samples(fixed,vartype,np.nan)
+                samplesets.append(dimod.append_variables(sampleset,fix_samples))
             return samplesets
 
     def forward(self, input_data=None, mask=None, **kwargs):
         # Execute model forward hooks and pre-hooks
         _ = self.model.forward()
-        # return_prob = False # TODO:
-
-        if mask is None: mask = np.ones(self.model.V)
 
         if input_data is None:
             self.return_prob = False
@@ -162,6 +176,7 @@ class BinaryQuadraticModelNetworkSampler(NetworkSampler):
             self.return_prob = True
             num_batches,remainder = divmod(torch.numel(input_data),self.model.V)
             if remainder: raise RuntimeError("Invalid input_data shape.")
+            if mask is None: mask = np.ones(self.model.V)
             shaped = input_data.reshape(-1,self.model.V)
             fixed_vars = [{i:v.item() for i,v in enumerate(d) if mask[i]} for d in shaped]
             self.sampleset = self.sample_bm(fixed_vars,**kwargs)

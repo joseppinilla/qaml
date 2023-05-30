@@ -57,13 +57,6 @@ class ExactNetworkSampler(BinaryQuadraticModelNetworkSampler):
         self._probabilities = probabilities.to(torch.float32)
         return self._probabilities
 
-    # @torch.no_grad()
-    # def sample_bm(self,fixed_vars={}):
-    #     bqm = self.to_bqm(fixed_vars)
-    #     bqm.scale(float(self.beta))
-    #     sampleset = self.child.sample(bqm)
-    #     return sampleset
-
     def forward(self, input_data=None, num_reads=None, mask=None, **ex_kwargs):
         # Execute model forward hooks and pre-hooks
         _ = self.model.forward()
