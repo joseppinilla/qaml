@@ -62,13 +62,14 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
         self._networkx_graph = self.device.to_networkx_graph()
         return self._networkx_graph
 
+QASampler = QuantumAnnealingNetworkSampler
 
 class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
 
     batch_embeddings = None
 
     def __init__(self, model, batch_embeddings=None, mask=None, auto_scale=True,
-                 beta=1.0, failover=False, retry_interval=-1, test=False **conf):
+                 beta=1.0, failover=False, retry_interval=-1, test=False, **conf):
         BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
         self.auto_scale = auto_scale
@@ -146,13 +147,18 @@ class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
                 samplesets.append(split_set)
             return dimod.concatenate(samplesets)
 
-        # Each sampleset is for a different input. Fill in and return.
-        else:
-            for fixed,split in zip(fixed_vars,split_samples):
-                split_set = dimod.SampleSet.from_samples(split,vartype,np.nan,info=info)
-                split_set.relabel_variables({k:v for k,v in enumerate(variables)})
-                fixed_set = dimod.SampleSet.from_samples(fixed,vartype,np.nan)
-                samplesets.append(dimod.append_variables(split_set,fixed_set))
-            return samplesets
+        # Or each sampleset is for a different input. Fill in and return.
+        for fixed,split in zip(fixed_vars,split_samples):
+            split_set = dimod.SampleSet.from_samples(split,vartype,np.nan,info=info)
+            split_set.relabel_variables({k:v for k,v in enumerate(variables)})
+            fixed_set = dimod.SampleSet.from_samples(fixed,vartype,np.nan)
+            samplesets.append(dimod.append_variables(split_set,fixed_set))
+        return samplesets
 
 BatchQASampler = BatchQuantumAnnealingNetworkSampler
+
+def DummySampler(device):
+    target = device.to_networkx_graph()
+    nodelist = target.nodes
+    edgelist = target.edges
+    return dimod.StructureComposite(dimod.RandomSampler(),nodelist,edgelist)

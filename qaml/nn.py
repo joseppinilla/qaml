@@ -136,8 +136,28 @@ class BoltzmannMachine(EnergyBasedModel):
     def forward(self, *args, **kwargs):
         return None
 
-    def __repr__(self):
-        return f'BoltzmannMachine({self.V},{self.H},{self.vartype.name})'
+    @torch.no_grad()
+    def energy(self, visible, hidden, scale=1.0):
+        """Compute the Energy of a state or batch of states.
+        Args:
+            visible (Tensor): Input vector of size RBM.V
+            hidden (Tensor): Hidden node vector of size RBM.H
+        """
+        # Visible and Hidden contributions (D,V)·(V,1) + (D,H)·(H,1) -> (D,1)
+        linear = torch.matmul(visible,self.b.T) + torch.matmul(hidden,self.c.T)
+        # Quadratic contributions (D,V)·(V,H) -> (D,H)x(1,H) -> sum_j((D,H)) -> (D,1)
+        quadratic = torch.sum(visible.matmul(self.W.T).mul(hidden),dim=-1)
+
+        # Visible-Visible contributions
+        vi,vj = np.triu_indices(self.V,1)
+        vis_vis = torch.sum((visible[:,vi].mul(visible[:,vj])).mul(self.vv),dim=-1)
+
+        # Hidden-Hidden contributions
+        hi,hj = np.triu_indices(self.H,1)
+        hid_hid = torch.sum((hidden[:,hi].mul(hidden[:,hj])).mul(self.hh),dim=-1)
+
+        # sum_j((D,H)) -> (D,1)
+        return -scale*(linear + quadratic + vis_vis + hid_hid)
 
 BM = BoltzmannMachine
 
