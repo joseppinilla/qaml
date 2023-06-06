@@ -79,56 +79,86 @@ class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
             assert batch_embeddings, "Embedding not found"
         self.embedding = self.combine_embeddings(batch_embeddings)
 
+        dummy_sampler =  dimod.StructureComposite(
+                                dimod.RandomSampler(),target.nodes,target.edges)
+
         self.child = SpinReversalTransformComposite(
                         FixedEmbeddingComposite(
-                            ScaleComposite(self.device),
+                            ScaleComposite(dummy_sampler), #self.device
                             self.embedding,scale_aware=True))
 
         self.batch_embeddings = batch_embeddings
 
-        def combine_embeddings(self, batch_embeddings):
-            combined_emb = {}
-            offset = len(self.model)
-            for i,emb in enumerate(batch_embeddings):
-                emb_i = {x+(i*offset):chain for x,chain in emb.items()}
-                combined_emb.update(emb_i)
-            edgelist = self.networkx_graph.edges
-            embedding = dwave.embedding.EmbeddedStructure(edgelist,combined_emb)
-            return embedding
+    def combine_embeddings(self, batch_embeddings):
+        combined_emb = {}
+        offset = len(self.model)
+        for i,emb in enumerate(batch_embeddings):
+            emb_i = {x+(i*offset):chain for x,chain in emb.items()}
+            combined_emb.update(emb_i)
+        edgelist = self.networkx_graph.edges
+        embedding = dwave.embedding.EmbeddedStructure(edgelist,combined_emb)
+        return embedding
 
-        def combine_bqms(self, fixed_vars):
-            if len(fixed_vars) == 0:
-                ising = self.to_ising()
-                batch_bqms = [ising for _ in self.batch_embeddings]
-            else:
-                batch_bqms = [self.to_ising(fix) for fix in fixed_vars]
+    def combine_bqms(self, fixed_vars):
+        if len(fixed_vars) == 0:
+            ising = self.to_ising()
+            batch_bqms = [ising.copy() for _ in self.batch_embeddings]
+        else:
+            batch_bqms = [self.to_ising(fix).copy() for fix in fixed_vars]
 
-            offset = len(self.model)
-            vartype = self.model.vartype
-            bqm = dimod.BinaryQuadraticModel.empty(vartype)
-            for i,bqm in enumerate(batch_bqms):
-                labels = {x:x+(i*offset) for x in bqm.variables}
-                relabeled = bqm.relabel_variables(labels,inplace=False)
-                bqm.update(relabeled)
-            return bqm
+        offset = len(self.model)
+        vartype = self.model.vartype
+        combined_bqm = dimod.BinaryQuadraticModel.empty(vartype)
+        for i,bqm in enumerate(batch_bqms):
+            labels = {x:x+(i*offset) for x in bqm.variables}
+            relabeled = bqm.relabel_variables(labels,inplace=False)
+            combined_bqm.update(relabeled.copy())
+        return combined_bqm
 
-        @property
-        def batch_size(self):
-            return len(self.embedding) if self.embedding else None
+    @property
+    def batch_size(self):
+        return len(self.batch_embeddings) if self.batch_embeddings else None
 
-        def sample_bm(self, fixed_vars=[], **kwargs):
-            scalar = None if self.auto_scale else self.beta.item()
-            sample_kwargs = {**self.sample_kwargs,**kwargs}
-            bqm = combine_bqms(fixed_vars)
-            response = self.child.sample(bqm,scalar=scalar,**sample_kwargs)
-            response.resolve()
-            sampleset = response.change_vartype(vartype)
-            info = sampleset.info.copy()
-            # (num_reads,VARS*batch_size)
-            samples = sampleset.record.sample.copy()
-            # (num_reads,VARS*batch_size)   ->   (num_reads,VARS)*batch_size
-            split_samples np.split(samples,self.batch_size,axis=1)
-            # TODO: Append fixed variables
+    def sample_bm(self, fixed_vars=[], **kwargs):
+        scalar = None if self.auto_scale else self.beta.item()
+        sample_kwargs = {**self.sample_kwargs,**kwargs}
+        vartype = self.model.vartype
+        if len(fixed_vars) > self.batch_size:
+            raise RuntimeError("Input batch size larger than sampler size")
+        bqm = self.combine_bqms(fixed_vars)
+
+        response = self.child.sample(bqm,scalar=scalar,**sample_kwargs)
+        response.resolve()
+        sampleset = response.change_vartype(vartype)
+        info = sampleset.info.copy()
+        variables = sampleset.variables.copy()
+        batch_size = len(fixed_vars) if fixed_vars else self.batch_size
+
+        # (num_reads,VARS*batch_size)
+        samples = sampleset.record.sample.copy()
+        # (num_reads,VARS*batch_size)   ->   (num_reads,VARS)*batch_size
+        split_samples = np.split(samples,batch_size,axis=1)
+        # Append fixed variables
+        samplesets = []
+
+        # All samples belong to the same BQM. Concatenate and return.
+        if len(fixed_vars) == 0:
+            for i,split in enumerate(split_samples):
+                split_set = dimod.SampleSet.from_samples(split,vartype,np.nan,info=info)
+                split_set.relabel_variables({k:v for k,v in enumerate(variables)})
+                samplesets.append(split_set)
+            return dimod.concatenate(samplesets)
+
+        # Each sampleset is for a different input. Fill in and return.
+        else:
+            for fixed,split in zip(fixed_vars,split_samples):
+                split_set = dimod.SampleSet.from_samples(split,vartype,np.nan,info=info)
+                split_set.relabel_variables({k:v for k,v in enumerate(variables)})
+                fixed_set = dimod.SampleSet.from_samples(fixed,vartype,np.nan)
+                samplesets.append(dimod.append_variables(split_set,fixed_set))
+            return samplesets
+
+BatchQASampler = BatchQuantumAnnealingNetworkSampler
 
 class BatchQuantumAnnealingBackUp(BinaryQuadraticModelNetworkSampler):
 
@@ -152,6 +182,7 @@ class BatchQuantumAnnealingBackUp(BinaryQuadraticModelNetworkSampler):
         BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
         self.device = dwave.system.DWaveSampler(failover,retry_interval,**conf)
+
         target = self.to_networkx_graph()
         self.auto_scale = auto_scale
 
@@ -336,5 +367,3 @@ class BatchQuantumAnnealingBackUp(BinaryQuadraticModelNetworkSampler):
         kwargs = {**self.sample_kwargs,**kwargs,'num_reads':num_reads}
         fixed_vars = [{i:v.item() for i,v in enumerate(d)} for d in input_data]
         return self.sample_bm(fixed_vars,embed_kwargs,unembed_kwargs,**kwargs)
-
-QASampler = QuantumAnnealingNetworkSampler
