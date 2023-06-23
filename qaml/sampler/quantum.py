@@ -124,13 +124,12 @@ class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
         vartype = self.model.vartype
         if len(fixed_vars) > self.batch_size:
             raise RuntimeError("Input batch size larger than sampler size")
-        bqm = self.combine_bqms(fixed_vars)
 
+        bqm = self.combine_bqms(fixed_vars)
         response = self.child.sample(bqm,scalar=scalar,**sample_kwargs)
         response.resolve()
         sampleset = response.change_vartype(vartype)
-        info = sampleset.info.copy()
-        variables = sampleset.variables.copy()
+
         batch_size = len(fixed_vars) if fixed_vars else self.batch_size
 
         # (num_reads,VARS*batch_size)
@@ -138,8 +137,10 @@ class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
         # (num_reads,VARS*batch_size)   ->   (num_reads,VARS)*batch_size
         split_samples = np.split(samples,batch_size,axis=1)
 
-        samplesets = []
+        info = sampleset.info.copy()
+        variables = sampleset.variables.copy()
         # All samples belong to the same BQM. Concatenate and return.
+        samplesets = []
         if len(fixed_vars) == 0:
             for i,split in enumerate(split_samples):
                 split_set = dimod.SampleSet.from_samples(split,vartype,np.nan,info=info)

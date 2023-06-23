@@ -117,18 +117,22 @@ class BoltzmannMachine(EnergyBasedModel):
         H (int): The size of the hidden layer.
     """
 
-    def __init__(self, V, H=0, vartype=dimod.BINARY):
+    def __init__(self, V, H=0, vartype=dimod.BINARY, h=[-4,4], J=[-1,1]):
         super(BoltzmannMachine, self).__init__(V,H,vartype)
+
+        lin = torch.distributions.uniform.Uniform(*h)
+        quad = torch .distributions.uniform.Uniform(*J)
+
         # Visible linear bias
-        self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
+        self.b = torch.nn.Parameter(lin.rsample((V,)),requires_grad=True)
         # Hidden linear bias
-        self.c = torch.nn.Parameter(torch.randn(H)*0.1,requires_grad=True)
+        self.c = torch.nn.Parameter(lin.rsample((H,)),requires_grad=True)
         # Visible-Visible quadratic bias
-        self.vv = torch.nn.Parameter(torch.randn(V*(V-1)//2)*0.1,requires_grad=True)
+        self.vv = torch.nn.Parameter(quad.rsample((V*(V-1)//2,)),requires_grad=True)
         # Hidden-Hidden quadratic bias
-        self.hh = torch.nn.Parameter(torch.randn(H*(H-1)//2)*0.1,requires_grad=True)
+        self.hh = torch.nn.Parameter(quad.rsample((H*(H-1)//2,)),requires_grad=True)
         # Visible-Hidden quadratic bias
-        self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
+        self.W = torch.nn.Parameter(quad.rsample((H,V)),requires_grad=True)
 
     def generate(self, *args, **kwargs):
         return None
@@ -169,18 +173,22 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
         H (int): The size of the hidden layer.
     """
 
-    def __init__(self, V, H, vartype=dimod.BINARY):
+    def __init__(self, V, H, vartype=dimod.BINARY, h=[-4,4], J=[-1,1]):
         super(RestrictedBoltzmannMachine, self).__init__(V,H,vartype)
+
+        lin = torch.distributions.uniform.Uniform(*h)
+        quad = torch .distributions.uniform.Uniform(*J)
+
         # Visible linear bias
-        self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
+        self.b = torch.nn.Parameter(lin.rsample((V,)),requires_grad=True)
         # Hidden linear bias
-        self.c = torch.nn.Parameter(torch.randn(H)*0.1,requires_grad=True)
+        self.c = torch.nn.Parameter(lin.rsample((H,)),requires_grad=True)
         # Visible-Visible quadratic bias
         self.vv = None
         # Hidden-Hidden quadratic bias
         self.hh = None
         # Visible-Hidden quadratic bias
-        self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
+        self.W = torch.nn.Parameter(quad.rsample((H,V)),requires_grad=True)
 
     def generate(self, hidden, scale=1.0):
         """Sample from visible. P(V) = σ(HW^T + b)"""
@@ -277,18 +285,22 @@ class LimitedBoltzmannMachine(EnergyBasedModel):
             H (int): The size of the hidden layer.
     """
 
-    def __init__(self, V, H, vartype=dimod.BINARY):
+    def __init__(self, V, H, vartype=dimod.BINARY, h=[-4,4], J=[-1,1]):
         super(LimitedBoltzmannMachine, self).__init__(V,H,vartype)
+
+        lin = torch.distributions.uniform.Uniform(*h)
+        quad = torch .distributions.uniform.Uniform(*J)
+
         # Visible linear bias
-        self.b = torch.nn.Parameter(torch.randn(V)*0.1,requires_grad=True)
+        self.b = torch.nn.Parameter(lin.rsample((V,)),requires_grad=True)
         # Hidden linear bias
-        self.c = torch.nn.Parameter(torch.randn(H)*0.1,requires_grad=True)
+        self.c = torch.nn.Parameter(lin.rsample((H,)),requires_grad=True)
         # Visible-Visible quadratic bias
         self.vv = None #TODO: Empty Tensor instead? change in module.matrix
         # Hidden-Hidden quadratic bias
-        self.hh = torch.nn.Parameter(torch.randn(H*(H-1)//2)*0.1,requires_grad=True)
+        self.hh = torch.nn.Parameter(quad.rsample((H*(H-1)//2,)),requires_grad=True)
         # Visible-Hidden quadratic bias
-        self.W = torch.nn.Parameter(torch.randn(H,V)*0.1,requires_grad=True)
+        self.W = torch.nn.Parameter(quad.rsample((H,V)),requires_grad=True)
 
     def generate(self, hidden, scale=1.0):
         """Sample from visible. P(V) = σ(HW^T + b)"""
