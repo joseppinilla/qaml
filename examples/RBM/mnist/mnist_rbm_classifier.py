@@ -7,7 +7,7 @@ import torchvision.datasets as torch_datasets
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-EPOCHS = 10
+EPOCHS = 20
 BATCH_SIZE = 64
 M,N = SHAPE = (28,28)
 # Stochastic Gradient Descent
@@ -17,14 +17,14 @@ momentum = 0.5
 
 ############################ Dataset and Transformations #######################
 mnist_train = torch_datasets.MNIST(root='./data/', train=True, download=True,
-                                     # transform=qaml.datasets.ToBinaryTensor())
-                                     transform=qaml.datasets.ToSpinTensor())
+                                     transform=qaml.datasets.ToBinaryTensor())
+                                     # transform=qaml.datasets.ToSpinTensor())
 qaml.datasets._embed_labels(mnist_train,axis=1,encoding='one_hot',scale=255)
 train_loader = torch.utils.data.DataLoader(mnist_train,batch_size=BATCH_SIZE)
 
 mnist_test = torch_datasets.MNIST(root='./data/', train=False, download=True,
-                                  # transform=qaml.datasets.ToBinaryTensor())
-                                  transform=qaml.datasets.ToSpinTensor())
+                                  transform=qaml.datasets.ToBinaryTensor())
+                                  # transform=qaml.datasets.ToSpinTensor())
 set_label,get_label = qaml.datasets._embed_labels(mnist_test,encoding='one_hot',
                                                  scale=255,setter_getter=True)
 test_loader = torch.utils.data.DataLoader(mnist_test)
@@ -42,20 +42,25 @@ VISIBLE_SIZE = M*N
 HIDDEN_SIZE = 128
 
 # Specify model with dimensions
-rbm = qaml.nn.RBM(VISIBLE_SIZE, HIDDEN_SIZE, 'SPIN')
+rbm = qaml.nn.RBM(VISIBLE_SIZE, HIDDEN_SIZE, 'BINARY')
+
+_ = torch.nn.init.uniform_(rbm.b,-0.1,0.1)
+_ = torch.nn.init.uniform_(rbm.c,-0.1,0.1)
+_ = torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                                               weight_decay=weight_decay,
                                               momentum=momentum)
 # Set up training mechanisms
-sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
+pos_sampler = neg_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
 CD = qaml.autograd.ContrastiveDivergence
 
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
 err_log = []
+accuracy_log = []
 for t in range(EPOCHS):
     epoch_error = torch.Tensor([0.])
     for img_batch, labels_batch in train_loader:
@@ -63,12 +68,12 @@ for t in range(EPOCHS):
         input_data = img_batch.flatten(1)
 
         # Positive Phase
-        v0, p_h0 = sampler(input_data, k=0)
+        v0, p_h0 = pos_sampler(input_data, k=0)
         # Negative Phase
-        p_vk, p_hk = sampler(v0, k=5)
+        p_vk, p_hk = neg_sampler(v0, k=5)
 
         # Reconstruction error from Contrastive Divergence
-        err = CD.apply(sampler, (v0,p_h0), (p_vk,p_hk), *rbm.parameters())
+        err = CD.apply(neg_sampler, (v0,p_h0), (p_vk,p_hk), *rbm.parameters())
 
         # Do not accumulated gradients
         optimizer.zero_grad()
@@ -81,11 +86,28 @@ for t in range(EPOCHS):
     err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
 
+    ############################## CLASSIFICATION ##################################
+    count = 0
+    for test_data, test_label in test_loader:
+        input_data = set_label(test_data.view(1,*SHAPE),0)
+        prob_hk = rbm.forward(input_data.flatten(1))
+        label_pred = get_label(rbm.generate(prob_hk).view(1,*SHAPE))
+        if label_pred.argmax() == test_label.item():
+            count+=1
+    accuracy_log.append(count/len(mnist_test))
+    print(f"Testing accuracy: {count}/{len(mnist_test)}")
+
 
 # Reconstruction error graph
 fig, ax = plt.subplots()
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
+plt.xlabel("Epoch")
+
+# Accuracy graph
+fig, ax = plt.subplots()
+plt.plot(accuracy_log)
+plt.ylabel("Accuracy")
 plt.xlabel("Epoch")
 
 # %%
@@ -104,17 +126,18 @@ rbm = torch.load("mnist_unsupervised.pt")
 
 # %%
 ################################# ANIMATION ####################################
-from matplotlib.animation import FuncAnimation
-img = torch.full((1,M,N),-1.0)
-label = (torch.nn.functional.one_hot(torch.LongTensor([3]),10)*2)-1
 
-FRAMES = 100
-img_data = []
-for _ in range(FRAMES):
-    clamped = set_label(img*0.2,label)
-    prob_hk = rbm.forward(clamped.flatten())
-    img.data = 2*rbm.generate(2*prob_hk-1).view(1,M,N)-1
-    img_data.append(img.detach().clone().numpy())
+from matplotlib.animation import FuncAnimation
+label = (torch.nn.functional.one_hot(torch.LongTensor([9]),10))
+clamped = set_label(0.1*torch.rand(1,M,N),label)
+
+FRAMES = 200
+img_data = [clamped.detach().clone().numpy()]
+for i in range(FRAMES):
+    prob_hr = rbm.forward(clamped.flatten().bernoulli()).bernoulli()
+    prob_vr = rbm.generate(prob_hr).view(1,M,N)
+    clamped = set_label(prob_vr,label)
+    img_data.append(clamped.detach().clone().numpy())
 
 fig = plt.figure()
 plot = plt.matshow(img_data[0].reshape(*SHAPE),fignum=0)
@@ -127,18 +150,8 @@ def update(j):
     plot.set_data(img_data[j].reshape(*SHAPE))
     return [plot]
 
-anim = FuncAnimation(fig,update,init_func=init,frames=FRAMES,interval=200,blit=True)
+anim = FuncAnimation(fig,update,init_func=init,frames=FRAMES,interval=10,blit=True)
 plt.show(block=False)
 anim.save("./animation.gif","pillow")
 
-# %%
-############################## CLASSIFICATION ##################################
-count = 0
-for test_data, test_label in test_loader:
-    input_data = set_label(test_data.view(1,*SHAPE),0)
-    prob_hk = rbm.forward(input_data.flatten(1))
-    label_pred = get_label(rbm.generate(prob_hk).view(1,*SHAPE))
-    if label_pred.argmax() == test_label.item():
-        count+=1
-
-print(f"Testing accuracy: {count}/{len(mnist_test)}")
+plt.matshow(img_data[-1].reshape(*SHAPE),fignum=0)

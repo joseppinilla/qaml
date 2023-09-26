@@ -6,7 +6,7 @@
 # Required packages
 import qaml
 import torch
-torch.manual_seed(0) # For deterministic weights
+torch.manual_seed(36) # For deterministic weights
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
@@ -16,7 +16,7 @@ M,N = SHAPE = (8,8)
 DATA_SIZE = N*M
 EPOCHS = 75
 BATCH_SIZE = 1024
-SUBCLASSES = [1,2,3,4]
+SUBCLASSES = [0,1,2,3,5,6,7,8]
 
 # Stochastic Gradient Descent
 learning_rate = 0.1
@@ -38,13 +38,22 @@ qaml.datasets._subset_classes(opt_test,SUBCLASSES)
 set_label,get_label = qaml.datasets._embed_labels(opt_test,encoding='one_hot',
                                                   scale=255,setter_getter=True)
 
+test_sampler = torch.utils.data.RandomSampler(opt_test,replacement=False)
+test_loader = torch.utils.data.DataLoader(opt_test,sampler=test_sampler)
+opt_train.data.shape
+
+opt_test.data.shape
+
 # Visualize
 fig, axs = plt.subplots(4, 5)
-for ax, (img, label) in zip(axs.flat, opt_test):
+for ax, (img, label) in zip(axs.flat, test_loader):
     ax.matshow(img.squeeze())
-    ax.set_title(int(label))
+    # ax.set_title(int(label))
     ax.axis('off')
 plt.tight_layout()
+
+%matplotlib
+plt.show()
 
 opt_test.data.dtype
 ################################# Model Definition #############################

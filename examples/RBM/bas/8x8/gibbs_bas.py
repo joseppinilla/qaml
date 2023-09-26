@@ -35,14 +35,6 @@ train_loader = torch.utils.data.DataLoader(train_dataset,BATCH_SIZE,sampler=trai
 test_sampler = torch.utils.data.RandomSampler(test_dataset,False)
 test_loader = torch.utils.data.DataLoader(test_dataset,BATCH_SIZE,sampler=test_sampler)
 
-# train_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
-# set_label,get_label = qaml.datasets._embed_labels(train_dataset,
-#                                                   encoding='binary',
-#                                                   setter_getter=True)
-# qaml.datasets._subset_classes(train_dataset,SUBCLASSES)
-# train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
-# train_loader = torch.utils.data.DataLoader(train_dataset,BATCH_SIZE,sampler=train_sampler)
-#
 
 # PLot all data
 fig,axs = plt.subplots(8,8)
@@ -51,6 +43,8 @@ for img_batch,labels_batch in train_loader:
         ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
     break
 plt.tight_layout()
+plt.savefig("dataset.svg")
+
 
 ################################# Model Definition #############################
 VISIBLE_SIZE = DATA_SIZE
@@ -64,16 +58,19 @@ _ = torch.nn.init.constant_(rbm.b,0.1)
 _ = torch.nn.init.zeros_(rbm.c)
 _ = torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 
-torch.nn.utils.prune.random_unstructured(rbm,'W',0.1)
+# torch.nn.utils.prune.random_unstructured(rbm,'W',0.1)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
-pos_sampler = neg_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
+pos_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
 CD = qaml.autograd.ContrastiveDivergence
 
+# CD-k
+neg_sampler = pos_sampler
+# or PCD-k
 # NUM_CHAINS = 100
 # neg_sampler = qaml.sampler.GibbsNetworkSampler(rbm,NUM_CHAINS)
 
@@ -89,7 +86,7 @@ accuracy_log = []
 b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
-for t in range(35):
+for t in range(200):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
@@ -99,11 +96,11 @@ for t in range(35):
         v0, p_h0 = pos_sampler(input_data.detach(), k=0)
 
         # Negative Phase
-        p_vk, p_hk = neg_sampler(v0.detach(),k=10)
-        # p_vk, p_hk = neg_sampler(k=5)
+        p_vk, p_hk = neg_sampler(v0.detach(),k=5) # CD-k
+        # p_vk, p_hk = neg_sampler(k=5) # ot PCD-k
 
         # Reconstruction error from Contrastive Divergence
-        err = CD.apply(gibbs_sampler,(v0,p_h0),(p_vk,p_hk), *rbm.parameters())
+        err = CD.apply(neg_sampler,(v0,p_h0),(p_vk,p_hk), *rbm.parameters())
 
         # Do not accumulate gradients
         optimizer.zero_grad()
@@ -116,7 +113,7 @@ for t in range(35):
 
         #Accumulate error for this epoch
         epoch_error  += err
-        vk = gibbs_sampler.sample(p_vk)
+        vk = neg_sampler.sample(p_vk)
         kl_div += qaml.perf.free_energy_smooth_kl(rbm,v0,vk)
 
     # KL-Divergence
@@ -138,11 +135,10 @@ for t in range(35):
     for test_data, test_labels in test_loader:
         input_data = test_data.flatten(1)
         mask = set_label(torch.ones(1,*SHAPE),0).flatten()
-        v_batch,h_batch = gibbs_sampler.reconstruct(input_data,mask=mask)
+        v_batch,h_batch = neg_sampler.reconstruct(input_data,mask=mask)
         for v_recon,v_test in zip(v_batch,test_data):
             label_pred = get_label(v_recon.view(1,*SHAPE))
             label_test = get_label(v_test.view(1,*SHAPE))
-
             if (torch.argmax(label_pred) == torch.argmax(label_test)):
                 count+=1
 
@@ -150,17 +146,18 @@ for t in range(35):
     print(f"Testing accuracy: {count}/{len(test_dataset)} ({count/len(test_dataset):.2f})")
 
 
-# Set the model to evaluation mode
-# rbm.eval()
-%matplotlib qt
-
-# Precision graph
+# L1 error graph
 fig, ax = plt.subplots()
-ax.plot(W_log)
-plt.ylabel("W")
+ax.plot(err_log)
+plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
 
-rbm.para
+# KL Divergence graph
+fig, ax = plt.subplots()
+ax.plot(kl_div_log)
+plt.ylabel("KL Divergence")
+plt.xlabel("Epoch")
+
 # Precision graph
 fig, ax = plt.subplots()
 ax.plot(p_log)
@@ -179,13 +176,6 @@ ax.plot(score_log)
 plt.ylabel("Score")
 plt.xlabel("Epoch")
 
-# L1 error graph
-fig, ax = plt.subplots()
-ax.plot(err_log)
-plt.ylabel("Reconstruction Error")
-plt.xlabel("Epoch")
-
-
 # Accuracy graph
 fig, ax = plt.subplots()
 ax.plot(accuracy_log)
@@ -197,10 +187,11 @@ plt.xlabel("Epoch")
 num_samples = 1000
 init = torch.FloatTensor(num_samples, VISIBLE_SIZE).uniform_(-1, +1)
 # init =  torch.rand(num_samples,DATA_SIZE)
-prob_v,_ = gibbs_sampler(init,k=1)
-img_samples = prob_v.view(num_samples,*SHAPE).bernoulli()
+prob_v,_ = neg_sampler(init,k=1)
+img_samples = prob_v.view(num_samples,*SHAPE)
 # PLot some samples
 fig,axs = plt.subplots(4,5)
 for ax,img in zip(axs.flat,img_samples):
-    ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
+    ax.matshow(img.view(*SHAPE)); ax.axis('off')
+plt.tight_layout()
 plt.tight_layout()

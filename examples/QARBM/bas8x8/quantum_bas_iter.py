@@ -31,7 +31,7 @@ chain_strength = 1.6
 num_reads = BATCH_SIZE
 
 sampler_type = 'Rep'
-solver_name = "Advantage_system4.1"
+solver_name = "Advantage_system6.2"
 if not os.path.exists(f"./{solver_name}/{sampler_type}/"):
     os.makedirs(f"./{solver_name}/{sampler_type}/")
 

@@ -85,20 +85,7 @@ pos_sampler = qaml.sampler.BatchQASampler(bm,solver=solver_name)
 
 neg_sampler = qaml.sampler.QASampler(bm,solver=solver_name)
 
-recon_emb = qaml.minor.
 recon_sampler = qaml.sampler.BatchQASampler(bm,fixed_vars=,solver=solver_name)
-
-
-import numpy as np
-A = np.asarray([1,0,1,0])
-
-idx = A.nonzero()
-
-idx[]
-
-np.nonzero
-
-neg_sampler =
 
 # Loss and autograd
 ML = qaml.autograd.MaximumLikelihood

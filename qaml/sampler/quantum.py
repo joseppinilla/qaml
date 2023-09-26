@@ -38,13 +38,20 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
 
         self.device = self.get_device(failover,retry_interval,**conf)
         if embedding is None:
-            embedding = qaml.minor.clique_from_cache(model,self,mask)
+            if 'Restricted' in str(model):
+                embedding = qaml.minor.biclique_from_cache(model,self,mask)
+            else:
+                embedding = qaml.minor.clique_from_cache(model,self,mask)
             assert embedding, "Embedding not found"
 
         edgelist = self.to_networkx_graph().edges
         self.embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
 
-        child = DummySampler(self.device) if test else self.device
+        if test:
+            print('TEST MODE ON')
+            child = DummySampler(self.device)
+        else:
+            child = self.device
 
         self.child = SpinReversalTransformComposite(
                         FixedEmbeddingComposite(

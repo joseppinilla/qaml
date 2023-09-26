@@ -22,8 +22,8 @@ weight_decay = 1e-4
 momentum = 0.5
 
 # Set up training mechanisms
-method = 'adachi'
-solver_name = "Advantage_system4.1"
+method = 'vanilla'
+solver_name = "Advantage_system6.2"
 sampler_kwargs = {'auto_scale':True,'num_spin_reversal_transforms':4}
 
 # Deterministic results
@@ -52,11 +52,6 @@ HIDDEN_SIZE = 64
 # Specify model with dimensions
 rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
 
-# Initialize biases
-_ = torch.nn.init.uniform_(rbm.b,-4.0,4.0)
-_ = torch.nn.init.uniform_(rbm.c,-4.0,4.0)
-_ = torch.nn.init.uniform_(rbm.W,-1.0,1.0)
-
 # Set up optimizer
 beta = 2.5
 optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate/beta,
@@ -68,8 +63,7 @@ CD = qaml.autograd.ContrastiveDivergence
 # Set up training mechanisms
 verbose = True
 if method == 'vanilla':
-    qa_sampler = qaml.sampler.QASampler(rbm,{},beta,solver=solver_name)
-    qa_sampler.set_embedding(qaml.minor.biclique_from_cache(rbm,qa_sampler,SEED))
+    neg_sampler = qaml.sampler.QASampler(rbm,beta=beta,solver=solver_name,test=True)
 
 elif method == 'adachi':
     qa_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
@@ -100,7 +94,7 @@ directory = f"{method}/{solver_name}/{SEED}"
 os.makedirs(f'{directory}',exist_ok=True)
 
 torch.save(rbm.to_networkx_graph(),f"{directory}/graph.pt")
-torch.save(dict(qa_sampler.embedding),f"{directory}/embedding.pt")
+torch.save(dict(neg_sampler.embedding),f"{directory}/embedding.pt")
 torch.save(rbm.state_dict().get('W_mask',{}),f"{directory}/mask.pt")
 
 err_log = []
@@ -124,10 +118,6 @@ W_log = [rbm.W.detach().clone().numpy()]
 # rbm.c.data = torch.tensor(c_log[-1])
 # rbm.W.data = torch.tensor(W_log[-1])
 
-qa_sampler.embedding
-
-qa_sampler.embedding_orig
-
 ################################## Model Training ##############################
 rbm.train()
 for t in range(1):
@@ -138,13 +128,13 @@ for t in range(1):
 
         input_data = img_batch.flatten(1)
         # Negative Phase
-        vk, hk = qa_sampler(num_reads=BATCH_SIZE,**sampler_kwargs)
+        vk, hk = neg_sampler(num_reads=BATCH_SIZE,**sampler_kwargs)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,beta*qa_sampler.scalar)
+        v0, prob_h0 = input_data, rbm(input_data,beta*neg_sampler.scalar)
 
         # Reconstruction error from Contrastive Divergence
-        err = CD.apply(qa_sampler,(v0,prob_h0), (vk,hk), *rbm.parameters())
+        err = CD.apply(neg_sampler,(v0,prob_h0), (vk,hk), *rbm.parameters())
 
         # Do not accumulate gradients
         optimizer.zero_grad()

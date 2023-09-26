@@ -1,7 +1,4 @@
 # # Classical BM training on the Bars-And-Stripes Dataset for Reconstruction
-# This is an example on classical Simulated Annealing training of an BM on the
-# BAS(4,4)
-# dataset.
 # Developed by: Jose Pinilla
 
 # Required packages
@@ -13,16 +10,18 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-M,N = SHAPE = (4,4)
+EPOCHS = 50
+M,N = SHAPE = (6,6)
 DATA_SIZE = N*M
-EPOCHS = 35
-# BATCH_SIZE = 64
 SUBCLASSES = [1,2]
 
 # Stochastic Gradient Descent
 learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
+
+TRAIN_READS = 10
+TEST_READS = 100
 
 #################################### Input Data ################################
 train_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
@@ -38,18 +37,14 @@ fig,axs = plt.subplots(4,4)
 for ax,(img,label) in zip(axs.flat,train_loader):
     ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
 plt.tight_layout()
+plt.savefig("dataset.svg")
 
 ################################# Model Definition #############################
 VISIBLE_SIZE = DATA_SIZE
-HIDDEN_SIZE = 4
+HIDDEN_SIZE = 16
 
 # Specify model with dimensions
 bm = qaml.nn.BM(VISIBLE_SIZE, HIDDEN_SIZE, 'SPIN')
-
-# Initialize biases
-_ = torch.nn.init.constant_(bm.b,0.1)
-_ = torch.nn.init.zeros_(bm.c)
-_ = torch.nn.init.uniform_(bm.W,-0.1,0.1)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
@@ -59,7 +54,6 @@ optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
 sa_sampler = qaml.sampler.SimulatedAnnealingNetworkSampler(bm)
 ML = qaml.autograd.MaximumLikelihood
 
-%%time
 ################################## Model Training ##############################
 # Set the model to training mode
 bm.train()
@@ -67,20 +61,23 @@ p_log = []
 r_log = []
 err_log = []
 score_log = []
-kl_div_log = []
+epoch_err_log = []
 b_log = [bm.b.detach().clone().numpy()]
 c_log = [bm.c.detach().clone().numpy()]
 W_log = [bm.W.detach().clone().numpy().flatten()]
-for t in range(35):
+vv_log = [bm.vv.detach().clone().numpy().flatten()]
+hh_log = [bm.hh.detach().clone().numpy().flatten()]
+
+for t in range(EPOCHS):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
-        input_data = img_batch.flatten()
+        input_data = img_batch.view(1,-1)
 
         # Positive Phase
-        v0, h0 = sa_sampler(input_data.detach(),num_reads=10)
+        v0, h0 = sa_sampler(input_data.detach(),num_reads=TRAIN_READS)
         # Negative Phase
-        vk, hk = sa_sampler(num_reads=10)
+        vk, hk = sa_sampler(num_reads=TRAIN_READS)
 
         # Reconstruction error from Contrastive Divergence
         err = ML.apply(sa_sampler,(v0,h0),(vk,hk), *bm.parameters())
@@ -96,29 +93,67 @@ for t in range(35):
 
         #Accumulate error for this epoch
         epoch_error  += err
+        err_log.append(err.item())
 
     # Error Log
     b_log.append(bm.b.detach().clone().numpy())
     c_log.append(bm.c.detach().clone().numpy())
+    vv_log.append(bm.vv.detach().clone().numpy())
+    hh_log.append(bm.hh.detach().clone().numpy())
     W_log.append(bm.W.detach().clone().numpy().flatten())
-    err_log.append(epoch_error.item())
+    # Error Log
+    epoch_err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
     # BAS score
+    vk,_ = sa_sampler(num_reads=TEST_READS)
     precision, recall, score = train_dataset.score(((vk+1)/2).view(-1,*SHAPE))
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-# Set the model to evaluation mode
-# bm.eval()
+torch.save(err_log,f'err_log_{TRAIN_READS}.pt')
+torch.save(p_log,f'p_log_{TRAIN_READS}.pt')
+torch.save(r_log,f'r_log_{TRAIN_READS}.pt')
+torch.save(score_log,f'score_log_{TRAIN_READS}.pt')
+torch.save(epoch_err_log,f'epoch_err_log_{TRAIN_READS}.pt')
 
-################################## Sampling ####################################
-num_samples = 1000
-init = torch.FloatTensor(num_samples, VISIBLE_SIZE).uniform_(-1, +1)
-# init =  torch.rand(num_samples,DATA_SIZE)
-prob_v,_ = gibbs_sampler(init,k=1)
-img_samples = prob_v.view(num_samples,*SHAPE).bernoulli()
-# PLot some samples
-fig,axs = plt.subplots(4,5)
-for ax,img in zip(axs.flat,img_samples):
+# Samples
+fig,axs = plt.subplots(4,4)
+for ax,img in zip(axs.flat,vk):
     ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
 plt.tight_layout()
+plt.savefig(f"sample_vk_{TRAIN_READS}.svg")
+
+# Precision graph
+fig, ax = plt.subplots()
+ax.plot(p_log)
+plt.ylabel("Precision")
+plt.xlabel("Epoch")
+plt.savefig(f"precision_{TRAIN_READS}.svg")
+
+# Recall graph
+fig, ax = plt.subplots()
+ax.plot(r_log)
+plt.ylabel("Recall")
+plt.xlabel("Epoch")
+plt.savefig(f"recall_{TRAIN_READS}.svg")
+
+# Score graph
+fig, ax = plt.subplots()
+ax.plot(score_log)
+plt.ylabel("Score")
+plt.xlabel("Epoch")
+plt.savefig(f"score_{TRAIN_READS}.svg")
+
+# Iteration Error
+fig, ax = plt.subplots()
+ax.plot(err_log)
+plt.ylabel("Reconstruction Error")
+plt.xlabel("Epoch")
+plt.savefig(f"sample_vk_{TRAIN_READS}.svg")
+
+# Epoch Error
+fig, ax = plt.subplots()
+ax.plot(epoch_err_log)
+plt.ylabel("Reconstruction Error")
+plt.xlabel("Epoch")
+plt.savefig(f"sample_vk_{TRAIN_READS}.svg")

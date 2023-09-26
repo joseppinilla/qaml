@@ -36,14 +36,19 @@ torch.manual_seed(SEED)
 optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
-# Set up training mechanisms
+# Heuristic embedding
 solver_name = "Advantage_system6.2"
-neg_sampler = qaml.sampler.QASampler(bm,solver=solver_name)
-pos_sampler = qaml.sampler.BatchQASampler(bm,solver=solver_name,mask=True)
+device = qaml.sampler.QASampler.get_device(solver=solver_name)
+embedding = qaml.minor.miner_heuristic(bm,device,seed=SEED)
 
-torch.save(dict(neg_sampler.embedding),f'./embedding.pt')
+# Save
+torch.save(embedding,f'./heur_embedding.pt')
 torch.save(bm.to_networkx_graph(),'./source.pt')
-torch.save(neg_sampler.to_networkx_graph(),'./target.pt')
+torch.save(device.to_networkx_graph(),'./target.pt')
+
+# Set up training mechanisms
+neg_sampler = qaml.sampler.QASampler(bm,solver=solver_name,embedding=embedding)
+pos_sampler = qaml.sampler.BatchQASampler(bm,solver=solver_name,mask=True)
 
 # Loss and autograd
 ML = qaml.autograd.MaximumLikelihood
@@ -89,11 +94,13 @@ c_log = [bm.c.detach().clone().numpy()]
 vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 W_log = [bm.W.detach().clone().numpy().flatten()]
-for t in range(1):
+
+for t in range(3):
     epoch_error = 0
 
     for img_batch, labels_batch in train_loader:
         # Positive Phase
+
         v0, h0 = pos_sampler(img_batch.flatten(1),num_reads=100)
 
         # Negative Phase
@@ -135,7 +142,7 @@ for t in range(1):
     for test_data, test_labels in test_loader:
         input_data = test_data.flatten(1)
         mask = set_label(torch.ones(1,*SHAPE),0).flatten()
-        v_batch,h_batch = recon_sampler.reconstruct(input_data,mask=mask,num_reads=5)
+        v_batch,h_batch = recon_sampler(input_data,mask=mask,num_reads=5)
         for v_recon,v_test in zip(v_batch,test_data):
             label_pred = get_label(v_recon.view(1,*SHAPE))
             label_test = get_label(v_test.view(1,*SHAPE))
@@ -146,16 +153,16 @@ for t in range(1):
     accuracy_log.append(count/TEST_SAMPLES)
     print(f"Testing accuracy: {count}/{TEST_SAMPLES} ({count/TEST_SAMPLES:.2f})")
 
+len(accuracy_log)
 
-################################ SAVE ##########################################
+################################## LOGGING #####################################
 directory = f"{HIDDEN_SIZE}_batch{BATCH_SIZE}"
 directory = directory.replace('.','')
+if not os.path.exists(directory): os.makedirs(directory)
+if not os.path.exists(f'{directory}/{SEED}'): os.makedirs(f'{directory}/{SEED}')
 
-if not os.path.exists(directory):
-        os.makedirs(directory)
-if not os.path.exists(f'{directory}/{SEED}'):
-        os.makedirs(f'{directory}/{SEED}')
 
+################################### SAVE #######################################
 torch.save(b_log,f"./{directory}/{SEED}/b.pt")
 torch.save(c_log,f"./{directory}/{SEED}/c.pt")
 torch.save(W_log,f"./{directory}/{SEED}/W.pt")

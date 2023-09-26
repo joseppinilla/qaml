@@ -117,7 +117,7 @@ class BoltzmannMachine(EnergyBasedModel):
         H (int): The size of the hidden layer.
     """
 
-    def __init__(self, V, H=0, vartype=dimod.BINARY, h=[-4,4], J=[-1,1]):
+    def __init__(self, V, H=0, vartype=dimod.BINARY, h=[-.1,.1], J=[-.1,.1]):
         super(BoltzmannMachine, self).__init__(V,H,vartype)
 
         lin = torch.distributions.uniform.Uniform(*h)

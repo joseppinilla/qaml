@@ -186,7 +186,7 @@ class BinaryQuadraticModelNetworkSampler(NetworkSampler):
                 samples = sampleset.record.sample.copy() # (num_reads,variables)
                 mean_samples = np.mean(samples,axis=0)
                 if concatenate.size == 0:
-                    concatenate = mean_samples
+                    concatenate = mean_samples.reshape(1,-1)
                 else:
                     concatenate = np.vstack(([concatenate,mean_samples]))
 
