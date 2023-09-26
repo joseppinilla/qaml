@@ -1,4 +1,4 @@
-%matplotlib qt
+
 import qaml
 import torch
 import itertools
@@ -13,103 +13,58 @@ np.set_printoptions(precision=2)
 torch.set_printoptions(precision=2)
 matplotlib.rc('text.latex', preamble=r'\usepackage{amsmath}')
 
-def plot_joint_samplesets(samplesets, shape=None, gray=False, labels=None, savefig=False):
-    nplots = len(samplesets)
-    fig = plt.figure()
+def plot_joint_samplesets(sampleset,shape):
+    # Use shape to find size of the graph
+    horizontal,vertical = shape
+    maxX, maxY = 2**(horizontal)-1, 2**(vertical)-1
 
-    def gray2bin(n):
-        w = len(n)
-        n = int(n, 2)
-        mask = n
+    # Treat the numbers as Gray code to plot similar numbers close to each other
+    # e.g. '0110' -> 4, '0111' -> 5, '0101' -> 6, ...
+    def bin_to_gray_index(n):
+        mask = n = int(n,2)
         while mask != 0:
-            mask >>= 1
-            n ^= mask
-        return format(n,f'0{w}b')
+            mask >>= 1; n ^= mask
+        return n
 
-    if shape is None:
-        size = len(samplesets[0].variables)
-        width = size//2
-        height = size-size//2
-    else:
-        size = sum(shape)
-        width,height = shape
+    # Takes a dimod.SampleSet and returns a string of the sample values
+    # e.g. sample={0: 0, 1: 0, 2: 1, 3: 0, 4: 1, 5: 1} -> "00101"
+    def sample_to_string(datum):
+        key_sorted = sorted(datum.sample)
+        return ''.join(str(int(1+datum.sample[k])//2) for k in key_sorted)
 
-    grid = plt.GridSpec(5, 5*nplots, hspace=0.0, wspace=0.0)
-
-    maxX = 2**(width)-1
-    maxY = 2**(height)-1
-
-    minE = float('Inf')
-    maxE = -float('Inf')
-    x = {}; y = {}; E = {}; c = {}
-    for i,sampleset in enumerate(samplesets):
-
-        x[i] = []; y[i] = []; E[i] = []; c[i] = []
-        if not sampleset: continue
-
-        # Reverse iteration allows plotting lower (important) samples on top.
-        for datum in sampleset.data(sorted_by='energy',reverse=True):
-            value = ''.join(str(int(1+datum.sample[k])//2) for k in sorted(datum.sample))
-            x_point = gray2bin(value[0:width]) if gray else value[0:width]
-            y_point = gray2bin(value[width:]) if gray else value[width:]
-            x[i].append(int(x_point,2)/maxX)
-            y[i].append(int(y_point,2)/maxY)
-            c[i].append(datum.num_occurrences)
-            E[i].append(datum.energy)
-            if datum.energy < minE: minE = datum.energy
-            if datum.energy > maxE: maxE = datum.energy
-
-    ims = []
-    xlim=ylim=(0.0,1.0)
-    rangeE = maxE - minE
-    for i,sampleset in enumerate(samplesets):
-        # Set up the axes with gridspec
-        main_ax = fig.add_subplot(grid[1:5,i*5:4+(i*5)],xlim=xlim,ylim=ylim)
-
-        h_params = {'frameon':False,'autoscale_on':False,'xticks':[],'yticks':[]}
-
-        if not sampleset: main_ax.set_xlabel('N/A'); continue
-
-        # Scatter points on the main axes
-        ratE = [5+250*(((energy-minE)/rangeE)**2) for energy in E[i]]
-        sct = main_ax.scatter(x[i],y[i],c=E[i],cmap="jet",alpha=0.5,marker='s')
-
-        minXY = [(x[i][ie],y[i][ie]) for ie,e in enumerate(E[i]) if e==minE]
-        if minXY: main_ax.scatter(*zip(*minXY),s=100,linewidths=1,c='k',marker='x')
-
-        ims.append(sct)
-        if labels is None:
-            labelX = 'VISIBLE'
-            labelY = 'HIDDEN'
-        else:
-            labelX,labelY = labels
-        main_ax.set_xlabel(labelX)
-        main_ax.set_ylabel(labelY)
-
-    # Color Bar
-    vmin,vmax = zip(*[im.get_clim() for im in ims])
-
-    for i,im in enumerate(ims):
-        im.set_clim(vmin=min(vmin),vmax=max(vmax))
-
-    plt.subplots_adjust(top=1,bottom=0.25,left=.05,right=.95,hspace=0,wspace=0)
-
-    cax = fig.add_axes([0.25,0.15,0.5,0.02]) # [left,bottom,width,height]
-    plt.colorbar(sct,orientation='horizontal',cax=cax)
-    _ = cax.set_xlabel('Energy')
-
-    if savefig:
-        path = savefig if isinstance(savefig,str) else "./samplesets_joint.pdf"
-        plt.savefig(path)
+    # Initilize results
+    minE, maxE = None, None
+    x = []; y = []; E = []; c = []
+    # Reverse iteration plots lower energy samples on top if there is overlap
+    for datum in sampleset.data(sorted_by='energy',reverse=True):
+        value = sample_to_string(datum)
+        x_point = bin_to_gray_index(value[0:horizontal])
+        y_point = bin_to_gray_index(value[horizontal:])
+        x.append(x_point/maxX); y.append(y_point/maxY)
+        c.append(datum.num_occurrences); E.append(datum.energy)
+        if (minE is None) or (datum.energy < minE): minE = datum.energy
+        if (maxE is None) or (datum.energy > maxE): maxE = datum.energy
 
 
+    fig = plt.figure(figsize=(8,8))
+    ax = plt.gca()
+    # Scatter points
+    sct = ax.scatter(x,y,c=E,cmap="jet",alpha=0.5,marker='s')
+    ax.set_xlabel('VISIBLE')
+    ax.set_ylabel('HIDDEN')
+    # Point at lowest value (or values) with an 'X'
+    minXY = [(x[ie],y[ie]) for ie,e in enumerate(E) if e==minE]
+    ax.scatter(*zip(*minXY),s=100,linewidths=1,c='k',marker='x')
+    # Plot colorbar
+    cax = fig.add_axes([0.0,0.0,1.0,0.02]) # [left,bottom,width,height]
+    plt.colorbar(sct,orientation='horizontal',cax=cax,label='Energy')
 
-rbm = qaml.nn.RestrictedBoltzmannMachine(5,5)
+################################################################################
+################################################################################
+SHAPE = (8,8)
+rbm = qaml.nn.RestrictedBoltzmannMachine(*SHAPE)
 solver = qaml.sampler.ExactNetworkSampler(rbm)
-
-solver.beta.data = torch.tensor(3.0)
-solver.beta
 _ = solver.get_energies()
-_ = plt.figure(1)
-plot_joint_samplesets([solver.sampleset],gray=False)
+
+plot_joint_samplesets(solver.sampleset,SHAPE)
 plt.savefig('landscape.svg')

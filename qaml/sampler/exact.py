@@ -41,6 +41,7 @@ class ExactNetworkSampler(BinaryQuadraticModelNetworkSampler):
     def get_energies(self):
         if self.sampleset is None:
             sampleset = self.sample_bm()
+            self.sampleset = sampleset
         else:
             sampleset = self.sampleset
         energies = sampleset.record['energy']

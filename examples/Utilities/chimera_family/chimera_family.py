@@ -13,19 +13,24 @@ C3 = dnx.chimera_graph(3)
 C3_busgraph = minorminer.busclique.busgraph_cache(C3)
 C3_one2one = {v:(v,) for v in C3}
 dnx.draw_chimera_embedding(C3,C3_one2one)
+plt.savefig("C3.svg")
 
 P2 = dnx.pegasus_graph(2)
 P2_busgraph = minorminer.busclique.busgraph_cache(P2)
 P2_one2one = {v:(v,) for v in P2}
 plt.figure(); dnx.draw_pegasus_embedding(P2,P2_one2one,crosses=True)
+plt.savefig("P2.svg")
 C10_2 = dnx.chimera_graph(12,12,2)
 plt.figure(); dnx.draw_chimera_embedding(C10_2,{},node_size=60)
 P2_busgraph.draw_fragment_embedding(P2_one2one,node_size=60)
+plt.savefig("P2_C12.svg")
 
 Z1 = dnx.zephyr_graph(1)
 Z1_busgraph = minorminer.busclique.busgraph_cache(Z1)
 Z1_one2one = {v:(v,) for v in Z1}
 plt.figure(); dnx.draw_zephyr_embedding(Z1,Z1_one2one)
+plt.savefig("Z1.svg")
 C3_8 = dnx.chimera_graph(3,3,8)
 plt.figure(); dnx.draw_chimera_embedding(C3_8,{},node_size=100)
 Z1_busgraph.draw_fragment_embedding(Z1_one2one,node_size=100)
+plt.savefig("Z1_C3.svg")
