@@ -151,18 +151,18 @@ cbar = fig.colorbar(ms, ax=axs.ravel().tolist(), shrink=0.95)
 # %%
 ################################## SAMPLE ######################################
 SAMPLES=4
-prob_vk,prob_hk = sampler(init=torch.rand(BATCH_SIZE,rbm.V)*0.1,k=3)
+prob_vk,prob_hk = sampler(torch.rand(BATCH_SIZE,rbm.V)*0.1,k=3)
 fig,axs = plt.subplots(1,SAMPLES)
 for ax,vk in zip(axs.flat,prob_vk):
     ax.matshow(vk.detach().view(28, 28))
     ax.axis('off')
-fig.subplots_adjust(wspace=0.0, hspace=0.0)
+fig.subplots_adjust(wspace=0.1, hspace=0.0)
 
 # %%
 ############################ NOISE RECONSTRUCTION ##############################
 input_data, label = train_loader.dataset[85] # Random input
 corrupt_data = (input_data + torch.randn_like(input_data)*0.5).view(1,784)
-prob_vk,prob_hk = sampler(k=1,init=corrupt_data.clone())
+prob_vk,prob_hk = sampler(corrupt_data.clone(),k=1)
 recon_data = prob_vk.detach()
 
 fig,axs = plt.subplots(1,3)
@@ -180,7 +180,7 @@ for i in range(0,15): # Is there a nicer way to create random masks?
 
 corrupt_data = (input_data*mask).view(1,784)
 
-prob_vk,prob_hk = sampler(k=1,init=corrupt_data.clone())
+prob_vk,prob_hk = sampler(corrupt_data.clone(),k=1)
 fig,axs = plt.subplots(1,3)
 axs[0].matshow(input_data.view(28, 28))
 axs[1].matshow(corrupt_data.view(28, 28))
@@ -200,6 +200,8 @@ model = torch.nn.Sequential(rbm,
 loss_fn = torch.nn.MSELoss(reduction='sum')
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
+loss_log = []
+accuracy_log = []
 for t in range(10):
     for v_batch, labels_batch in train_loader:
         # Forward pass: compute predicted y by passing x to the model.
@@ -218,11 +220,24 @@ for t in range(10):
 
         # Calling the step function on an Optimizer makes an update to its parameters
         optimizer.step()
+
+    loss_log.append(loss.item())
     print(f"Epoch {t} Loss = {loss.item()}")
 
-count = 0
-for test_data, test_label in test_loader:
-    label_pred = model(test_data.view(1,VISIBLE_SIZE)).argmax()
-    if label_pred == test_label:
-        count+=1
-print(f"Testing accuracy: {count}/{len(test_dataset)}")
+    count = 0
+    for test_data, test_label in test_loader:
+        label_pred = model(test_data.view(1,VISIBLE_SIZE)).argmax()
+        if label_pred == test_label:
+            count+=1
+    accuracy_log.append(count/len(test_dataset))
+    print(f"Testing accuracy: {count}/{len(test_dataset)}")
+
+fig, ax = plt.subplots()
+plt.plot(loss_log)
+plt.ylabel("Loss")
+plt.xlabel("Epoch")
+
+fig, ax = plt.subplots()
+plt.plot(accuracy_log)
+plt.ylabel("Accuracy")
+plt.xlabel("Epoch")

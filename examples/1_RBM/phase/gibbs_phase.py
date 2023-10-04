@@ -104,12 +104,12 @@ for t in range(EPOCHS):
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
 
 
-torch.save(err_log,f'err_log_{num_reads}.pt')
-torch.save(p_log,f'p_log_{num_reads}.pt')
-torch.save(r_log,f'r_log_{num_reads}.pt')
-torch.save(score_log,f'score_log_{num_reads}.pt')
-torch.save(accuracy_log,f'accuracy_log_{num_reads}.pt')
-torch.save(epoch_err_log,f'epoch_err_log_{num_reads}.pt')
+torch.save(p_log,f'p_log.pt')
+torch.save(r_log,f'r_log.pt')
+torch.save(err_log,f'err_log.pt')
+torch.save(score_log,f'score_log.pt')
+torch.save(kl_div_log,f'kl_div_log.pt')
+torch.save(epoch_err_log,f'epoch_err_log.pt')
 
 # KL Divergence
 fig, ax = plt.subplots()

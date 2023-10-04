@@ -141,7 +141,6 @@ for t in range(200):
             label_test = get_label(v_test.view(1,*SHAPE))
             if (torch.argmax(label_pred) == torch.argmax(label_test)):
                 count+=1
-
     accuracy_log.append(count/len(test_dataset))
     print(f"Testing accuracy: {count}/{len(test_dataset)} ({count/len(test_dataset):.2f})")
 
@@ -193,5 +192,4 @@ img_samples = prob_v.view(num_samples,*SHAPE)
 fig,axs = plt.subplots(4,5)
 for ax,img in zip(axs.flat,img_samples):
     ax.matshow(img.view(*SHAPE)); ax.axis('off')
-plt.tight_layout()
 plt.tight_layout()

@@ -40,9 +40,6 @@ set_label,get_label = qaml.datasets._embed_labels(opt_test,encoding='one_hot',
 
 test_sampler = torch.utils.data.RandomSampler(opt_test,replacement=False)
 test_loader = torch.utils.data.DataLoader(opt_test,sampler=test_sampler)
-opt_train.data.shape
-
-opt_test.data.shape
 
 # Visualize
 fig, axs = plt.subplots(4, 5)
@@ -52,21 +49,12 @@ for ax, (img, label) in zip(axs.flat, test_loader):
     ax.axis('off')
 plt.tight_layout()
 
-%matplotlib
-plt.show()
-
-opt_test.data.dtype
 ################################# Model Definition #############################
 VISIBLE_SIZE = DATA_SIZE
 HIDDEN_SIZE = 16
 
 # Specify model with dimensions
 rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
-
-# Initialize biases
-# _ = torch.nn.init.uniform_(rbm.b,-0.1,0.1)
-# _ = torch.nn.init.uniform_(rbm.c,-0.1,0.1)
-# _ = torch.nn.init.uniform_(rbm.W,-0.1,0.1)
 
 # Set up optimizer
 optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
@@ -159,32 +147,6 @@ ax.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
 plt.savefig("classical_err_log.pdf")
-
-# Visible bias graph
-fig, ax = plt.subplots()
-ax.set_prop_cycle('color', list(plt.get_cmap('turbo',DATA_SIZE).colors))
-lc_v = ax.plot(b_log)
-plt.legend(iter(lc_v),[f'b{i}' for i in range(DATA_SIZE)],ncol=2,bbox_to_anchor=(1,1))
-plt.ylabel("Visible Biases")
-plt.xlabel("Epoch")
-plt.savefig("classical_visible_bias_log.pdf")
-
-# Hidden bias graph
-fig, ax = plt.subplots()
-ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE).colors))
-lc_h = plt.plot(c_log)
-plt.legend(lc_h,[f'c{i}' for i in range(HIDDEN_SIZE)],ncol=2,bbox_to_anchor=(1,1))
-plt.ylabel("Hidden Biases")
-plt.xlabel("Epoch")
-plt.savefig("classical_hidden_bias_log.pdf")
-
-# Weights graph
-fig, ax = plt.subplots()
-ax.set_prop_cycle('color', list(plt.get_cmap('turbo',HIDDEN_SIZE*DATA_SIZE).colors))
-lc_w = plt.plot(W_log)
-plt.ylabel("Weights")
-plt.xlabel("Epoch")
-plt.savefig("classical_weights_log.pdf")
 
 # %%
 ################################## VISUALIZE ###################################

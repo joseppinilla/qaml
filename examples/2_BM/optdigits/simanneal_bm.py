@@ -86,7 +86,6 @@ vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 
 ################################## Model Training ##############################
-%%time
 for t in range(1):
     print(f"Epoch {t}")
     epoch_error = torch.Tensor([0.])
