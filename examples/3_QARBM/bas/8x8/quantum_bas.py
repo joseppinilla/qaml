@@ -1,32 +1,31 @@
-# %% markdown
 # # Quantum-Assisted RBM training on the BAS Dataset for Reconstruction
 # This is an example on quantum-assisted training of an RBM on the BAS(4,4)
 # dataset.
 # Developed by: Jose Pinilla
-# %%
+
 # Required packages
 import qaml
 import torch
 torch.manual_seed(0) # For deterministic weights
 
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 import torchvision.transforms as torch_transforms
 
-# %%
+
 ################################# Hyperparameters ##############################
 M,N = SHAPE = (8,8)
 DATA_SIZE = N*M
 HIDDEN_SIZE = 64
-EPOCHS = 150
+EPOCHS = 200
 SAMPLES = None
 BATCH_SIZE = 400
-TRAIN,TEST = SPLIT = 400,110
+TRAIN,TEST = SPLIT = 350,160
 # Stochastic Gradient Descent
 learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
-# %%
 #################################### Input Data ################################
 bas_dataset = qaml.datasets.BAS(*SHAPE,embed_label=True,transform=torch.Tensor)
 train_dataset,test_dataset = torch.utils.data.random_split(bas_dataset,[*SPLIT])
@@ -38,60 +37,54 @@ train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,
 # PLot all data
 fig,axs = plt.subplots(6,5)
 for ax,(img,label) in zip(axs.flat,train_dataset):
-    ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
+    ax.imshow(img.view(*SHAPE),interpolation='nearest'); ax.axis('off')
 plt.tight_layout()
+plt.savefig('BAS 8x8.svg')
 
 # %%
 ################################# Model Definition #############################
 # Specify model with dimensions
+beta = 2.5
 rbm = qaml.nn.RBM(DATA_SIZE,HIDDEN_SIZE)
 
 # Initialize biases
-torch.nn.init.constant_(rbm.b,-0.5)
-torch.nn.init.zeros_(rbm.c)
-torch.nn.init.uniform_(rbm.W,-0.5,0.5)
+weight_init = 4.0
+_ = torch.nn.init.zeros_(rbm.b)
+_ = torch.nn.init.zeros_(rbm.c)
+_ = torch.nn.init.uniform_(rbm.W,-weight_init,weight_init)
 
 # Set up optimizers
-optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
+optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
-# Trainable inverse temperature with separate optimizer
-beta = torch.nn.Parameter(torch.tensor(2.5), requires_grad=True)
-beta_optimizer = torch.optim.SGD([beta],lr=0.01)
-# solver_name = "DW_2000Q_6"
-solver_name = "Advantage_system1.1"
+auto_scale = True
+solver_name = "Advantage_system4.1"
 qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
-# qa_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
-# qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
-# qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler)
-# print(f"Edges pruned: {len((rbm.state_dict()['W_mask']==0).nonzero())}")
+
 # Loss and autograd
 CD = qaml.autograd.SampleBasedConstrastiveDivergence()
-betaGrad = qaml.autograd.AdaptiveBeta()
 
 # %%
 ################################## Model Training ##############################
 # Set the model to training mode
 rbm.train()
 err_log = []
-beta_log = []
-err_beta_log = []
+scalar_log = []
 accuracy_log = []
 b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
-for t in range(100):
+for t in range(200):
     epoch_error = 0
-    epoch_error_beta = 0
-
     for img_batch, labels_batch in train_loader:
         input_data = img_batch.flatten(1)
 
         # Negative Phase
-        vk, prob_hk = qa_sampler(500,auto_scale=True)
+        vk, prob_hk = qa_sampler(BATCH_SIZE,auto_scale=auto_scale,num_spin_reversal_transforms=2)
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,scale=qa_sampler.beta*qa_sampler.scalar)
+        scale = qa_sampler.scalar*qa_sampler.beta if auto_scale else 1.0
+        v0, prob_h0 = input_data, rbm(input_data,scale=scale)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply((v0,prob_h0), (vk,prob_hk), *rbm.parameters())
@@ -108,128 +101,49 @@ for t in range(100):
         #Accumulate error for this epoch
         epoch_error  += err.item()
 
-        err_beta = betaGrad.apply(rbm.energy(v0,prob_h0),rbm.energy(vk,prob_hk),beta)
-        beta_optimizer.zero_grad()
-        err_beta.backward()
-        beta_optimizer.step()
-        beta.data = torch.clamp(beta,min=1.0)
-        epoch_error_beta  += err_beta.item()
-
     # Error Log
     b_log.append(rbm.b.detach().clone().numpy())
     c_log.append(rbm.c.detach().clone().numpy())
     W_log.append(rbm.W.detach().clone().numpy().flatten())
     err_log.append(epoch_error)
-    beta_log.append(beta.item())
-    err_beta_log.append(epoch_error_beta)
+    scalar_log.append(qa_sampler.scalar)
     print(f"Epoch {t} Reconstruction Error = {epoch_error}")
-    print(f"Beta = {qa_sampler.beta}")
-    print(f"Beta Error = {epoch_error_beta}")
-    print(f"Scaling factor = {qa_sampler.scalar}")
     ############################## CLASSIFICATION ##################################
     count = 0
-    mask = torch.ones(1,M,N)
     for test_data, test_label in test_dataset:
         test_data[-2:,-1] = 0.5
-        prob_hk = rbm(test_data.flatten(),scale=qa_sampler.scalar*qa_sampler.beta)
-        label_pred = rbm.generate(prob_hk,scale=qa_sampler.scalar*qa_sampler.beta).view(*SHAPE)[-2:,-1]
+        test_hid = rbm(test_data.flatten(),scale=1.0)
+        label_pred = rbm.generate(test_hid,scale=1.0).view(*SHAPE)[-2:,-1]
         if label_pred.argmax() == test_label.argmax():
             count+=1
     accuracy_log.append(count/TEST)
     print(f"Testing accuracy: {count}/{TEST} ({count/TEST:.2f})")
 
 
-# Set the model to evaluation mode
-# rbm.eval()
-
-# %%
-############################## Logging Directory ###############################
-import os
-directory = 'BAS88_adabeta_scale_200_seed0_Adv'
-if not os.path.exists(directory):
-        os.makedirs(directory)
 
 
-# %% md
-############################ Store Model and Logs ##############################
-torch.save(b_log,f"./{directory}/quantum_b.pt")
-torch.save(c_log,f"./{directory}/quantum_c.pt")
-torch.save(W_log,f"./{directory}/quantum_W.pt")
-torch.save(err_log,f"./{directory}/quantum_err.pt")
-torch.save(accuracy_log,f"./{directory}/quantum_accuracy.pt")
-torch.save(dict(qa_sampler.embedding),f"./{directory}/embedding.pt")
-torch.save(dict(qa_sampler.embedding_orig),f"./{directory}/embedding_orig.pt")
-
-# %% md
-############################ Load Model and Logs ###############################
-b_log = torch.load(f"./{directory}/quantum_b.pt")
-c_log = torch.load(f"./{directory}/quantum_c.pt")
-W_log = torch.load(f"./{directory}/quantum_W.pt")
-err_log = torch.load(f"./{directory}/quantum_err.pt")
-accuracy_log = torch.load(f"./{directory}/quantum_accuracy.pt")
-embedding = torch.load(f"./{directory}/embedding.pt")
-embedding_orig = torch.load(f"./{directory}/embedding_orig.pt")
-
-rbm.b.data = torch.tensor(b_log[-1])
-rbm.c.data = torch.tensor(c_log[-1])
-rbm.W.data = torch.tensor(W_log[-1]).view(rbm.H,rbm.V)
-qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,
-                                    beta=beta,embedding=embedding)
-
-# %%
-################################# qBAS Score ###################################
-scale = qa_sampler.scalar
-num_samples = 1000
-gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=scale)
-prob_v,_ = gibbs_sampler(torch.rand(num_samples,DATA_SIZE),k=200)
-img_samples = prob_v.view(num_samples,*SHAPE).bernoulli()
-# PLot some samples
-fig,axs = plt.subplots(4,5)
-for ax,img in zip(axs.flat,img_samples):
-    ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
-plt.tight_layout()
-# Get and print score
-p,r,score = bas_dataset.score(img_samples)
-print(f"qBAS : Precision = {p:.02} Recall = {r:.02} Score = {score:.02}")
 
 # %%
 ############################## RECONSTRUCTION ##################################
-k = 5
-hist = {}
-count = 0
-scale = 24
-mask = torch_transforms.functional.erase(torch.ones(1,M,N),2,2,4,4,0).flatten()
-for img, label in bas_dataset:
-    clamped = mask*(img.flatten().detach().clone())
-    prob_hk = rbm.forward(clamped + (1-mask)*0.5,scale=scale)
-    prob_vk = rbm.generate(prob_hk,scale=scale).detach()
-    for _ in range(k):
-        masked = clamped + (1-mask)*prob_vk.data
-        prob_hk.data = rbm.forward(masked,scale=scale).data
-        prob_vk.data = rbm.generate(prob_hk,scale=scale).data
-    recon = (clamped + (1-mask)*prob_vk).bernoulli().view(img.shape)
-    if recon.equal(img):
-        count+=1
-    num = torch.count_nonzero(recon.to(bool).bitwise_xor(img.to(bool))).item()
-    hist[num]=hist.get(num,0)+1
-print(f"Dataset Reconstruction: {count/(TEST+TRAIN):.02}")
-plt.bar(hist.keys(),hist.values())
-plt.ylabel('Frequency')
-plt.xlabel('Incorrect Bits')
+scale = 1.0
+bce = []
+gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=scale)
+mask = torch_transforms.functional.erase(torch.ones(1,M,N),4,4,4,4,0).flatten()
+for img, label in train_dataset:
+    input_data = img.flatten()
+    prob_vk,prob_hk = gibbs_sampler.reconstruct(input_data,k=1,mask=mask)
+    bce.append(F.binary_cross_entropy(input_data,prob_vk).item())
+_ = plt.hist(bce,bins=100)
+
 # %%
 ############################ MODEL VISUALIZATION ###############################
 
-# Beta error graph
+# Scalar graph
 fig, ax = plt.subplots()
-plt.plot(beta_log)
-plt.ylabel("Beta")
+plt.plot(scalar_log)
+plt.ylabel("Scaling factor")
 plt.xlabel("Epoch")
-
-# Beta error graph
-fig, ax = plt.subplots()
-plt.plot(err_beta_log)
-plt.ylabel("Beta Error")
-plt.xlabel("Epoch")
+plt.savefig("quantum_scalar.pdf")
 
 # Testing accuracy graph
 fig, ax = plt.subplots()
@@ -273,7 +187,6 @@ plt.savefig("quantum_W_log.pdf")
 
 # %%
 ################################## ENERGY ######################################
-scale=qa_sampler.scalar*qa_sampler.beta
 data_energies = []
 for img,label in bas_dataset:
     data = img.flatten()
@@ -285,14 +198,14 @@ for img in rand_data:
     rand_energies.append(rbm.free_energy(img.bernoulli()).item())
 
 gibbs_energies = []
-gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=scale)
+gibbs_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=1.0)
 for img,label in bas_dataset:
     data = img.flatten()
-    prob_v,prob_h = gibbs_sampler(data,k=50)
+    prob_v,prob_h = gibbs_sampler(data,k=5)
     gibbs_energies.append(rbm.free_energy(prob_v.bernoulli()).item())
 
 qa_energies = []
-qa_sampleset = qa_sampler(num_reads=100,auto_scale=True)
+qa_sampleset = qa_sampler(num_reads=BATCH_SIZE,auto_scale=True,num_spin_reversal_transforms=2)
 for s_v,s_h in zip(*qa_sampleset):
     qa_energies.append(rbm.free_energy(s_v.detach()).item())
 
@@ -334,9 +247,9 @@ plt.savefig("quantum_weights.pdf")
 
 # %%
 ########################### Check parameter range ##############################
-h_range = qa_sampler.properties['h_range']
-J_range = qa_sampler.properties['extended_j_range']
-target_ising = qa_sampler.embed_bqm()
+h_range = qa_sampler.sampler.properties['h_range']
+J_range = qa_sampler.sampler.properties['extended_j_range']
+target_ising = qa_sampler.embed_bqm(chain_strength=0.8)
 linear = target_ising.linear.values()
 quad = target_ising.quadratic.values()
 print(f"Linear range [{min(linear):.2} <> {max(linear):.2}] @ device={h_range}")

@@ -4,9 +4,11 @@
 # Developed by: Jose Pinilla
 
 # Required packages
+import os
 import qaml
 import torch
-torch.manual_seed(0) # For deterministic weights
+SEED = 0
+torch.manual_seed(SEED) # For deterministic weights
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
@@ -65,11 +67,13 @@ optimizer = torch.optim.SGD(rbm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
+K = 20
 pos_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
-CD = qaml.autograd.ContrastiveDivergence
 
 # CD-k
 neg_sampler = pos_sampler
+CD = qaml.autograd.ContrastiveDivergence
+
 # or PCD-k
 # NUM_CHAINS = 100
 # neg_sampler = qaml.sampler.GibbsNetworkSampler(rbm,NUM_CHAINS)
@@ -86,7 +90,7 @@ accuracy_log = []
 b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy().flatten()]
-for t in range(200):
+for t in range(EPOCHS):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
@@ -96,7 +100,7 @@ for t in range(200):
         v0, p_h0 = pos_sampler(input_data.detach(), k=0)
 
         # Negative Phase
-        p_vk, p_hk = neg_sampler(v0.detach(),k=5) # CD-k
+        p_vk, p_hk = neg_sampler(v0.detach(),k=K) # CD-k
         # p_vk, p_hk = neg_sampler(k=5) # ot PCD-k
 
         # Reconstruction error from Contrastive Divergence
@@ -144,6 +148,22 @@ for t in range(200):
     accuracy_log.append(count/len(test_dataset))
     print(f"Testing accuracy: {count}/{len(test_dataset)} ({count/len(test_dataset):.2f})")
 
+############################ Store Model and Logs ##############################
+
+directory = f"CD-{K}"
+
+if not os.path.exists(f"./{directory}/{SEED}/"):
+    os.makedirs(f"./{directory}/{SEED}/")
+
+torch.save(b_log,f"./{directory}/{SEED}/b.pt")
+torch.save(c_log,f"./{directory}/{SEED}/c.pt")
+torch.save(W_log,f"./{directory}/{SEED}/W.pt")
+torch.save(p_log,f"./{directory}/{SEED}/p_log.pt")
+torch.save(r_log,f"./{directory}/{SEED}/r_log.pt")
+torch.save(err_log,f"./{directory}/{SEED}/err.pt")
+torch.save(score_log,f"./{directory}/{SEED}/score_log.pt")
+torch.save(kl_div_log,f"./{directory}/{SEED}/kl_div_log.pt")
+torch.save(accuracy_log,f"./{directory}/{SEED}/accuracy.pt")
 
 # L1 error graph
 fig, ax = plt.subplots()
