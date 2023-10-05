@@ -7,133 +7,66 @@ import networkx as nx
 import dwave_networkx as dnx
 import matplotlib.pyplot as plt
 
-def plot_compare(plot_data,solver_graph):
+def plot_quality(directory,label,solver_graph):
     _ = plt.figure()
-    for (directory,label) in plot_data:
-        abspath = os.path.abspath(f'../{directory}')
-        if not os.path.isdir(abspath): print(f"Not found: {abspath}"); continue
 
+    abspath = os.path.abspath(f'../{directory}')
+    if not os.path.isdir(abspath): print(f"Not found: {abspath}"); return
+
+    for seed in os.listdir(abspath):
+        emb_filepath = f"{abspath}/{seed}/embedding.pt"
+
+        if seed.isnumeric():
+            if os.path.exists(emb_filepath): emb = torch.load(emb_filepath)
+            else: continue
 
         graph_filepath = f"{abspath}/{seed}/graph.pt"
         if os.path.exists(graph_filepath):
-            if os.path.exists(graph_filepath):
-                S = torch.load(f"{abspath}/{seed}/graph.pt")
-                graphs.append(S)
+            if os.path.exists(graph_filepath): S = torch.load(f"{abspath}/{seed}/graph.pt")
+            else: continue
 
-        miner = minorminer.miner(S,T)
+        miner = minorminer.miner(S,solver_graph)
+        state,O,QK = miner.quality_key(emb)
+        label_i = label + f'_{seed}'
 
-        embeddings = []
-        for seed in os.listdir(abspath):
-            emb_filepath = f"{abspath}/{seed}/embedding.pt"
+        plt.bar(QK[0::2], QK[1::2],alpha=0.5,label=label_i)
+        plt.xlabel('Chain length')
+        plt.ylabel('Count')
+        plt.legend(framealpha=0.5)
 
-            if seed.isnumeric():
-                if os.path.exists(emb_filepath):
-                    emb = torch.load(emb_filepath)
-                    embeddings.append(emb)
+def plot_embeddings(directory,label,solver_graph):
 
+    abspath = os.path.abspath(f'../{directory}')
+    if not os.path.isdir(abspath): print(f"Not found: {abspath}"); return
 
-        quality = [miner.quality_key(emb) for emb in embeddings]
-        # min_i = quality.index(min(quality))
-        # seed,embedding = embeddings[min_i]
-        # state,O,L = quality[min_i]
-        print(label)
-        for i,(seed, embedding) in enumerate(embeddings):
-            state,O,L = quality[i]
+    for seed in os.listdir(abspath):
+        emb_filepath = f"{abspath}/{seed}/embedding.pt"
 
-            QK = {L[i]:L[i+1] for i in range(0,len(L),2)}
-            _ = plt.figure(figsize=(16,16))
-            dnx.draw_pegasus_embedding(T,embedding,node_size=10)
-            # plt.savefig(f"{directory}_{filename}")
-            plt.title(QK)
-            print(f'SEED {seed}: {QK}')
+        if seed.isnumeric():
+            if os.path.exists(emb_filepath): emb = torch.load(emb_filepath)
+            else: continue
 
+        graph_filepath = f"{abspath}/{seed}/graph.pt"
+        if os.path.exists(graph_filepath):
+            if os.path.exists(graph_filepath): S = torch.load(f"{abspath}/{seed}/graph.pt")
+            else: S = None
 
+        _ = plt.figure(figsize=(16,16))
+        dnx.draw_pegasus_embedding(solver_graph,emb,S,node_size=10)
 
-    plt.legend(framealpha=0.5)
-
+######################### Heuristic and Systematic #############################
+EXPERIMENT = "Embedding-Heuristic_64x64"
 SOLVER_NAME = "Advantage_system4.1"
 SUBDIR = "3_QARBM/optdigits/64x64"
-PLOT_DATA = [(f'{SUBDIR}/vanilla','Complete'),
-             (f'{SUBDIR}/heuristic','Heuristic')]
+PLOT_DATA = [(f'{SUBDIR}/vanilla','Sys'),
+             (f'{SUBDIR}/heuristic','Heur')]
 SOLVER_GRAPH = torch.load(f'./Architectures/{SOLVER_NAME}.pt')
 
-plot_compare(PLOT_DATA,SOLVER_GRAPH)
+if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
 
+for directory,label in PLOT_DATA:
+    plot_quality(directory,label,SOLVER_GRAPH)
+    plt.savefig(f'./{EXPERIMENT}/quality_{label}.svg')
 
-def load_graph(): torch.load(f"{abspath}/{seed}/graph.pt")
-def load_embedding(): torch.load(f"{abspath}/{seed}/embedding.pt")
-
-sampler = qaml.sampler.QASampler.get_sampler(solver=solver_name)
-T = sampler.to_networkx_graph()
-
-
-
-
-def plot_compare(plot_data,filename):
-    for (directory,label) in plot_data:
-
-        abspath = os.path.abspath(f'./{directory}/{solver_name}')
-
-        S = torch.load(f"{abspath}/{seed}/graph.pt")
-
-        miner = minorminer.miner(S,T)
-
-        embeddings = []
-        for seed in os.listdir(abspath):
-            try: embedding = torch.load(f"{abspath}/{seed}/embedding.pt")
-            except: continue
-            embeddings.append((seed,embedding))
-
-
-        quality = [miner.quality_key(emb) for seed,emb in embeddings]
-        # min_i = quality.index(min(quality))
-        # seed,embedding = embeddings[min_i]
-        # state,O,L = quality[min_i]
-        print(label)
-        for i,(seed, embedding) in enumerate(embeddings):
-            state,O,L = quality[i]
-
-            QK = {L[i]:L[i+1] for i in range(0,len(L),2)}
-            _ = plt.figure(figsize=(16,16))
-            dnx.draw_pegasus_embedding(T,embedding,node_size=10)
-            # plt.savefig(f"{directory}_{filename}")
-            plt.title(QK)
-            print(f'SEED {seed}: {QK}')
-
-
-# plot_data = [(<folder_name>,<label>)]
-plot_data = [('vanilla','Complete'),
-             ('heuristic','Heuristic'),
-             ('adaptive','Adaptive'),
-             ('priority','Priority'),
-             ('repurpose','Repurpose'),
-             ('adachi','Adachi')]
-
-# plot_data = [('heuristic','Heur')]
-plot_compare(plot_data,filename)
-
-heur0 = {34: 1, 32: 1, 31: 4, 30: 2, 29: 3, 28: 4, 27: 3, 26: 2, 25: 3, 24: 5, 23: 9, 22: 6, 21: 11, 20: 6, 19: 8, 18: 14, 17: 17, 16: 10, 15: 8, 14: 6, 13: 3, 12: 2}
-heur1 = {25: 1, 23: 3, 22: 1, 21: 1, 20: 2, 19: 6, 18: 6, 17: 18, 16: 14, 15: 20, 14: 29, 13: 22, 12: 5}
-heur2 = {22: 1, 21: 1, 20: 7, 19: 5, 18: 13, 17: 11, 16: 17, 15: 27, 14: 18, 13: 23, 12: 5}
-
-
-plt.bar(heur0.keys(),heur0.values(),alpha=0.5,label='heur0')
-plt.bar(heur1.keys(),heur1.values(),alpha=0.5,label='heur1')
-plt.bar(heur2.keys(),heur2.values(),alpha=0.5,label='heur2')
-plt.xlabel('Chain length')
-plt.ylabel('Count')
-plt.legend()
-plt.savefig('compare_embeddings_heuristic.svg')
-
-complete = {13: 113, 12: 15}
-adachi = {6: 126, 4: 1, 3: 1, 2: 1, 1: 1}
-adaptive = {6: 126, 4: 1, 3: 1}
-priority = {6: 126, 4: 1, 3: 1}
-repurpose = {6: 126, 4: 1, 3: 1, 1: 1}
-
-
-plots = [(complete,'Complete'),
-         (adachi,'Adachi'),
-         (adaptive,'Adaptive'),
-         (priority,'Priority'),
-         (repurpose,'Repurpose')]
+for directory,label in PLOT_DATA:
+    plot_embeddings(directory,label,SOLVER_GRAPH)
