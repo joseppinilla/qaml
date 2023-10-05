@@ -37,10 +37,13 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
         self.auto_scale = auto_scale
 
         self.device = self.get_device(failover,retry_interval,**conf)
+        # If embedding not provided. Allows empty embedding {}
         if embedding is None:
+            # Try biclique if RBM
             if 'Restricted' in str(model):
                 embedding = qaml.minor.biclique_from_cache(model,self,mask)
-            else:
+            # Try clique otherwise and if biclique fails
+            if not embedding:
                 embedding = qaml.minor.clique_from_cache(model,self,mask)
             assert embedding, "Embedding not found"
 

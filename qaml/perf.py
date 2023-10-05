@@ -61,8 +61,8 @@ def finite_sampling_error(model, beta_range=None, num_reads=int(10e6),
                 against.
             num_reads (int): Number of samples
         Return:
-            beta (float):
-            distance (float):
+            beta (list of floats): same as the provided range or default range
+            distance (list of floats): distances from the corresponding beta
     """
     if beta_range is None:
         beta_range = np.linspace(0,1.0,21)

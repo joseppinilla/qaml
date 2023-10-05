@@ -1,4 +1,3 @@
-# %%
 # # Quantum RBM training on the MNIST Dataset for reconstruction and classification
 # This is an example on quantum annealing training of an RBM on the MNIST
 # dataset.
@@ -19,7 +18,7 @@ from torch.nn.functional import max_pool2d
 SEED = 8
 _ = torch.manual_seed(SEED)
 
-# %%
+
 ################################# Hyperparameters ##############################
 EPOCHS = 1
 M,N = SHAPE = (13,13)
@@ -35,7 +34,6 @@ momentum = 0.5
 auto_scale = True
 solver_name = "Advantage_system4.1"
 
-# %%
 ############################ Dataset and Transformations #######################
 mnist_train = torch_datasets.MNIST(root='./data/', train=True, download=True,
                                    transform=qaml.datasets.ToSpinTensor())
@@ -62,7 +60,6 @@ for ax, (img, label) in zip(axs.flat, test_loader):
     ax.axis('off')
 plt.tight_layout()
 
-# %%
 ################################# Model Definition #############################
 VISIBLE_SIZE = DATA_SIZE
 HIDDEN_SIZE = 8
@@ -84,42 +81,7 @@ optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate/beta,
 # Loss and autograd
 CD = qaml.autograd.ContrastiveDivergence
 
-%matplotlib qt
-import dwave_networkx as dnx
 # Set up training mechanisms
-qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta,chain_imbalance=0)
-qa_sampler2 = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
+qa_sampler = qaml.sampler.QASampler(rbm,solver=solver_name,beta=beta)
 
-_ = plt.figure(1)
-dnx.draw_pegasus_embedding(qa_sampler.networkx_graph,qa_sampler.embedding,node_size=10)
-
-_ = plt.figure(2)
-dnx.draw_pegasus_embedding(qa_sampler2.networkx_graph,qa_sampler2.embedding,node_size=10)
-
-
-import minorminer
-S = qa_sampler.to_bqm().quadratic
-embedding = minorminer.find_embedding(S, qa_sampler.networkx_graph)
-
-len([q for chain in embedding.values() for q in chain])
-embedding
-qa_sampler.networkx_graph
-
-source = dimod.to_networkx_graph(bqm)
-embedding, trimmed = qaml.prune.trim_embedding(target, embedding, source)
-
-cache = minorminer.busclique.busgraph_cache(qa_sampler.networkx_graph)
-embedding = cache.find_biclique_embedding(rbm.V, rbm.H)
-embedding
-
-
-# Positive-phase sampler
-pos_sampler = qaml.sampler.GibbsNetworkSampler(rbm,beta=beta)
-
-# Loss and autograd
-CD = qaml.autograd.ConstrastiveDivergence()
-# %%
-
-
-pos_sampler.beta
-# %%
+# TODO
