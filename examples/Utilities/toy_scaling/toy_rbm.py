@@ -30,6 +30,10 @@ for auto_scale in auto_scales:
     with open(beta_filename, "a") as myfile:
         myfile.write(f"0.1 0.5 1.0 2.0 4.0\n")
 
+    if not auto_scale:
+        with open('scalar.csv', "a") as myfile:
+            myfile.write(f"0.1 0.5 1.0 2.0 4.0\n")
+
     for seed in seeds:
 
         torch.manual_seed(seed)
@@ -63,7 +67,14 @@ for auto_scale in auto_scales:
             with open(beta_filename, "a") as myfile:
                 myfile.write(f"{beta/qa_sampler.scalar} ")
 
+            if not auto_scale:
+                with open('scalar.csv', "a") as myfile:
+                    myfile.write(f"{qa_sampler.scalar} ")
+
         with open(dist_filename, "a") as myfile:
             myfile.write(f"\n")
         with open(beta_filename, "a") as myfile:
             myfile.write(f"\n")
+        if not auto_scale:
+            with open('scalar.csv', "a") as myfile:
+                myfile.write(f"\n")

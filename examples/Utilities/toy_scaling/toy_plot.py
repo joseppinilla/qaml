@@ -46,6 +46,16 @@ def plot_beta(data,filename):
         line.set_markerfacecolor('#7f7f7f')
     plt.savefig(filename)
 
+def plot_alpha(data,filename):
+    plt.figure()
+    ax = plt.gca()
+    for line,label,color in zip(data,labels,colors):
+        ax.plot(line,label=label,color=color)
+    ax.set_xlabel('Uniform Weight Range')
+    ax.set_ylabel(r'$\alpha$', rotation=0)
+    ax.yaxis.grid(True)
+    plt.legend()
+    plt.savefig(filename)
 
 # auto_scale = False
 df = pd.read_csv("./dist_noscale.csv",delim_whitespace=True).transpose()
@@ -64,3 +74,7 @@ plot_distance(figa,"distance_scale.eps")
 df = pd.read_csv("./beta_scale.csv",delim_whitespace=True).transpose()
 figb =df.values.tolist()
 plot_beta(figb,"beta_scale.eps")
+
+df = pd.read_csv("./scalar.csv",delim_whitespace=True).transpose()
+figc = df.values.tolist()
+plot_alpha(figc,"alpha_scale.eps")
