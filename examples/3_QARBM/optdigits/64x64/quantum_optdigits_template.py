@@ -105,19 +105,6 @@ b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy()]
 
-################################## Load Log ################################
-# b_log = torch.load(f"./{directory}/b.pt")
-# c_log = torch.load(f"./{directory}/c.pt")
-# W_log = torch.load(f"./{directory}/W.pt")
-# err_log = torch.load(f"./{directory}/err.pt")
-# kl_div_log = torch.load(f"./{directory}/kl_div.pt")
-# scalar_log = torch.load(f"./{directory}/scalar.pt")
-# accuracy_log = torch.load(f"./{directory}/accuracy.pt")
-#
-# rbm.b.data = torch.tensor(b_log[-1])
-# rbm.c.data = torch.tensor(c_log[-1])
-# rbm.W.data = torch.tensor(W_log[-1])
-
 ################################## Model Training ##############################
 rbm.train()
 for t in range(1):

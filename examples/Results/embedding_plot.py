@@ -7,8 +7,58 @@ import networkx as nx
 import dwave_networkx as dnx
 import matplotlib.pyplot as plt
 
-filename = "Optdigits_RBM(64,64).svg"
-solver_name = "Advantage_system4.1"
+def plot_compare(plot_data,solver_graph):
+    _ = plt.figure()
+    for (directory,label) in plot_data:
+        abspath = os.path.abspath(f'../{directory}')
+        if not os.path.isdir(abspath): print(f"Not found: {abspath}"); continue
+
+
+        graph_filepath = f"{abspath}/{seed}/graph.pt"
+        if os.path.exists(graph_filepath):
+            if os.path.exists(graph_filepath):
+                S = torch.load(f"{abspath}/{seed}/graph.pt")
+                graphs.append(S)
+
+        miner = minorminer.miner(S,T)
+
+        embeddings = []
+        for seed in os.listdir(abspath):
+            emb_filepath = f"{abspath}/{seed}/embedding.pt"
+
+            if seed.isnumeric():
+                if os.path.exists(emb_filepath):
+                    emb = torch.load(emb_filepath)
+                    embeddings.append(emb)
+
+
+        quality = [miner.quality_key(emb) for emb in embeddings]
+        # min_i = quality.index(min(quality))
+        # seed,embedding = embeddings[min_i]
+        # state,O,L = quality[min_i]
+        print(label)
+        for i,(seed, embedding) in enumerate(embeddings):
+            state,O,L = quality[i]
+
+            QK = {L[i]:L[i+1] for i in range(0,len(L),2)}
+            _ = plt.figure(figsize=(16,16))
+            dnx.draw_pegasus_embedding(T,embedding,node_size=10)
+            # plt.savefig(f"{directory}_{filename}")
+            plt.title(QK)
+            print(f'SEED {seed}: {QK}')
+
+
+
+    plt.legend(framealpha=0.5)
+
+SOLVER_NAME = "Advantage_system4.1"
+SUBDIR = "3_QARBM/optdigits/64x64"
+PLOT_DATA = [(f'{SUBDIR}/vanilla','Complete'),
+             (f'{SUBDIR}/heuristic','Heuristic')]
+SOLVER_GRAPH = torch.load(f'./Architectures/{SOLVER_NAME}.pt')
+
+plot_compare(PLOT_DATA,SOLVER_GRAPH)
+
 
 def load_graph(): torch.load(f"{abspath}/{seed}/graph.pt")
 def load_embedding(): torch.load(f"{abspath}/{seed}/embedding.pt")
@@ -16,12 +66,15 @@ def load_embedding(): torch.load(f"{abspath}/{seed}/embedding.pt")
 sampler = qaml.sampler.QASampler.get_sampler(solver=solver_name)
 T = sampler.to_networkx_graph()
 
+
+
+
 def plot_compare(plot_data,filename):
     for (directory,label) in plot_data:
 
         abspath = os.path.abspath(f'./{directory}/{solver_name}')
 
-        S = torch.load(f"{abspath}/8/graph.pt")
+        S = torch.load(f"{abspath}/{seed}/graph.pt")
 
         miner = minorminer.miner(S,T)
 
