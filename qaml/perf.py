@@ -2,6 +2,8 @@ import qaml
 import torch
 import numpy as np
 
+import matplotlib.pyplot as plt
+
 @torch.no_grad()
 def distance_from_gibbs(model, samples, beta_range=None):
     """ Test a range of inverse temperature values to find the closests match
@@ -151,3 +153,41 @@ def smooth_kl(P, Q, smooth=1e-6):
     Q = Q[support_intersection]
 
     return (P*torch.log(P/Q)).sum()
+
+
+def chain_grad_variance(embedding,b_log,c_log):
+    """ Given an embedding, and the value of the linear weights during training
+        computes and plots the gradient at each epoch for each chain.
+        Meant to check the relation between chain length and gradient distribution.
+    """
+    chain_length = {k:len(chain) for k,chain in embedding.items()}
+
+
+    bias_data = {k:[] for k in embedding}
+    for b_set,c_set in zip(b_log,c_log):
+        for i,b in enumerate(b_set):
+            bias_data[i].append(b)
+        for j,c in enumerate(c_set,start=64):
+            bias_data[j].append(c)
+
+    index= []
+    data = []
+    length = []
+    for i, (key, val) in enumerate(bias_data.items()):
+        length.append(chain_length[i])
+        index.append(key)
+        data.append(val)
+
+    sorted_length, sorted_data = zip(*sorted(zip(length, data)))
+
+    gradient_data = []
+    for data in sorted_data:
+        gradient_bias = []
+        for a,b in zip(data[:-1],data[1:]):
+            gradient_bias.append(b-a)
+        gradient_data.append(gradient_bias)
+
+    _ = plt.figure()
+    ax = plt.gca()
+    _ = ax.boxplot(gradient_data)
+    _ = ax.set_xticklabels(sorted_length)
