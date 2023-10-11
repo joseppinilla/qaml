@@ -29,6 +29,20 @@ def plot_compare(plot_data,metric):
     plt.legend(framealpha=0.5)
 
 
+############################### Exact v Quantum ################################
+EXPERIMENT = "BM_Exact_v_Quantum"
+METRICS = [('score_log','Score'),
+           ('epoch_err_log','Reconstruction Error'),
+           ('p_log','Precision'),
+           ('r_log','Recall')]
+PLOT_DATA = [(f'2_BM/phase',   'Exact'),
+             (f'4_QABM/phase', 'Quantum')]
+
+if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
+for metric,label in METRICS:
+    plot_compare(PLOT_DATA,(metric,label))
+    plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
+
 ################################## Adaptive ####################################
 EXPERIMENT = "QARBM_Adaptive"
 SUBDIR = "3_QARBM/optdigits/64x64"

@@ -55,6 +55,7 @@ class BinaryQuadraticModelNetworkSampler(NetworkSampler):
 
     _qubo = None
     _ising = None
+    _alpha = 1.0
     _networkx_graph = None
 
     sampleset = None
@@ -134,7 +135,7 @@ class BinaryQuadraticModelNetworkSampler(NetworkSampler):
         if (self.sampleset is None) or (self.auto_scale is False):
             return 1.0
         else:
-            if len(self.sampleset) == 1:
+            if type(self.sampleset) is dimod.sampleset.SampleSet:
                 return self.sampleset.info['scalar']
             alpha_list = [s.info['scalar'] for s in self.sampleset]
             alpha_set = set(alpha_list)
@@ -157,13 +158,15 @@ class BinaryQuadraticModelNetworkSampler(NetworkSampler):
                 response = self.child.sample(bqm,scalar=scalar,**sample_kwargs)
                 response.resolve()
                 sampleset = response.change_vartype(vartype)
-                fix_samples = dimod.SampleSet.from_samples(fixed,vartype,np.nan)
+                info = sampleset.info.copy()
+                fix_samples = dimod.SampleSet.from_samples(fixed,vartype,np.nan,info=info)
                 samplesets.append(dimod.append_variables(sampleset,fix_samples))
             return samplesets
 
     def forward(self, input_data=None, mask=None, **kwargs):
         # Execute model forward hooks and pre-hooks
-        _ = self.model.forward()
+         #TODO: RBMs run this but is not needed
+        _ = self.model.forward(torch.zeros(1,self.model.V))
 
         if input_data is None:
             self.return_prob = False

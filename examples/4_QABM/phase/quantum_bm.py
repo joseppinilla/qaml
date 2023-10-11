@@ -17,12 +17,37 @@ SHAPE = (1,9)
 DATA_SIZE = 8
 LABEL_SIZE = 1
 # Stochastic Gradient Descent
-learning_rate = 0.01
+learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
-TRAIN_READS = 10
-TEST_READS = 100
+POS_READS, NEG_READS, TEST_READS = 100, 200, 20
+
+################################# Model Definition #############################
+VISIBLE_SIZE = DATA_SIZE + LABEL_SIZE
+HIDDEN_SIZE = 8
+bm = qaml.nn.BoltzmannMachine(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
+
+# Initialize biases
+_ = torch.nn.init.uniform_(bm.b,-4.0,4.0)
+_ = torch.nn.init.uniform_(bm.c,-4.0,4.0)
+_ = torch.nn.init.uniform_(bm.vv,-1.0,1.0)
+_ = torch.nn.init.uniform_(bm.hh,-1.0,1.0)
+_ = torch.nn.init.uniform_(bm.W,-1.0,1.0)
+
+# Set up optimizer
+optimizer = torch.optim.SGD(bm.parameters(),lr=learning_rate,
+                            weight_decay=weight_decay,
+                            momentum=momentum)
+
+# Set up training mechanisms
+SOLVER_NAME = "Advantage_system4.1"
+pos_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=True)
+neg_sampler = qaml.sampler.QASampler(bm,solver=SOLVER_NAME)
+BATCH_SIZE = len(pos_sampler.batch_embeddings)
+
+# Loss and autograd
+ML = qaml.autograd.MaximumLikelihood
 
 #################################### Input Data ################################
 phase_dataset = qaml.datasets.PhaseState(DATA_SIZE,labeled=True,
@@ -33,33 +58,18 @@ SPLIT = TRAIN,len(phase_dataset)-TRAIN
 train_dataset,test_dataset = torch.utils.data.random_split(phase_dataset,[*SPLIT])
 
 train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
-train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler)
+train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler,batch_size=BATCH_SIZE)
+
 test_sampler = torch.utils.data.RandomSampler(test_dataset,replacement=False)
-test_loader = torch.utils.data.DataLoader(test_dataset,sampler=test_sampler)
+test_loader = torch.utils.data.DataLoader(test_dataset,sampler=test_sampler,batch_size=BATCH_SIZE)
 
 # Visualize
 fig,axs = plt.subplots(4,5)
-for ax,(img,label) in zip(axs.flat,train_loader):
+for ax,(img,label) in zip(axs.flat,train_dataset):
     ax.matshow(img.view(1,-1))
     ax.set_title(int(label))
     ax.axis('off')
 plt.tight_layout()
-plt.savefig("dataset.svg")
-
-################################# Model Definition #############################
-VISIBLE_SIZE = DATA_SIZE + LABEL_SIZE
-HIDDEN_SIZE = 8
-bm = qaml.nn.BoltzmannMachine(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
-
-# Set up training mechanisms
-pos_sampler = qaml.sampler.ExactNetworkSampler(bm)
-neg_sampler = qaml.sampler.ExactNetworkSampler(bm)
-
-# Loss and autograd
-ML = qaml.autograd.MaximumLikelihood
-# Set up optimizers
-optimizer = torch.optim.SGD(bm.parameters(),lr=learning_rate,
-                            weight_decay=weight_decay,momentum=momentum)
 
 ################################## Model Training ##############################
 bm.train()
@@ -74,16 +84,17 @@ vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 W_log = [bm.W.detach().clone().numpy().flatten()]
 
-for t in range(EPOCHS):
+
+for t in range(50):
     epoch_error = torch.Tensor([0.])
     for train_data, train_label in train_loader:
 
         input_data = torch.cat((train_data,train_label),axis=1)
         # Positive Phase
-        v0, h0 = pos_sampler(input_data.flatten(),num_reads=TRAIN_READS)
+        v0, h0 = pos_sampler(input_data.flatten(),num_reads=POS_READS)
 
         # Negative Phase
-        vk, hk = neg_sampler(num_reads=TRAIN_READS)
+        vk, hk = neg_sampler(num_reads=NEG_READS)
 
         # Compute error
         err = ML.apply(neg_sampler,(v0,h0),(vk,hk),*bm.parameters())
@@ -98,12 +109,13 @@ for t in range(EPOCHS):
         epoch_error += err
         err_log.append(err.item())
 
-    # Parameter log
+
     b_log.append(bm.b.detach().clone().numpy())
     c_log.append(bm.c.detach().clone().numpy())
     vv_log.append(bm.vv.detach().clone().numpy())
     hh_log.append(bm.hh.detach().clone().numpy())
     W_log.append(bm.W.detach().clone().numpy().flatten())
+    epoch_err_log.append(epoch_error.item())
     # Error Log
     epoch_err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
@@ -132,9 +144,8 @@ fig,axs = plt.subplots(4,4)
 for ax,img in zip(axs.flat,vk):
     ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
 plt.tight_layout()
-plt.savefig(f"sample_vk_{TRAIN_READS}.svg")
 
-# Iteration Error graph
+# Iteration Error
 fig, ax = plt.subplots()
 ax.plot(err_log)
 plt.ylabel("Iteration Error")
@@ -146,11 +157,13 @@ ax.plot(p_log)
 plt.ylabel("Precision")
 plt.xlabel("Epoch")
 
+
 # Recall graph
 fig, ax = plt.subplots()
 ax.plot(r_log)
 plt.ylabel("Recall")
 plt.xlabel("Epoch")
+
 
 # Score graph
 fig, ax = plt.subplots()
@@ -158,7 +171,8 @@ ax.plot(score_log)
 plt.ylabel("Score")
 plt.xlabel("Epoch")
 
-# Epoch error graph
+
+# L1 error graph
 fig, ax = plt.subplots()
 ax.plot(epoch_err_log)
 plt.ylabel("Reconstruction Error")
