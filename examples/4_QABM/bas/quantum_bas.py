@@ -39,57 +39,32 @@ _ = torch.nn.init.uniform_(bm.vv,-1.0,1.0)
 _ = torch.nn.init.uniform_(bm.hh,-1.0,1.0)
 _ = torch.nn.init.uniform_(bm.W,-1.0,1.0)
 
-# torch.nn.utils.prune.random_unstructured(bm,'W',0.2)
-# torch.nn.utils.prune.random_unstructured(bm,'vv',0.2)
-# torch.nn.utils.prune.random_unstructured(bm,'hh',0.2)
 
-import numpy as np
-
-rbm = qaml.nn.RestrictedBoltzmannMachine(3,4,'SPIN')
-bas_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
-set_label,get_label = qaml.datasets._embed_labels(bas_dataset,setter_getter=True)
-
-mask = set_label(torch.ones(1,*SHAPE),0).flatten()
-
-mask
-
-
-
-solver_name = "Advantage_system6.1"
-sampler = qaml.sampler.QASampler.get_sampler(solver=solver_name)
-
-embeddings = qaml.minor.harvest_cliques(bm,sampler,mask)
-list(embeddings)
-
-embedding = qaml.minor.biclique_from_cache(bm,sampler,mask)
-embedding
-
-embedding = qaml.minor.clique_from_cache(bm,sampler,mask)
-embedding
-
-embedding = qaml.minor.miner_heuristic(bm,sampler,mask=mask)
-embedding
-
-# Set up optimizers
-optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
-                            weight_decay=weight_decay,momentum=momentum)
+# Set up optimizer
+optimizer = torch.optim.SGD(bm.parameters(),lr=learning_rate,
+                            weight_decay=weight_decay,
+                            momentum=momentum)
 
 # Set up training mechanisms
-solver_name = "Advantage_system6.1"
+TYPE = "heur"
+SOLVER_NAME = "Advantage_system4.1"
+if TYPE == "full":
+    pos_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=True)
+    TRAIN_BATCH = len(pos_sampler.batch_embeddings)
 
+    neg_sampler = qaml.sampler.QASampler(bm,solver=SOLVER_NAME)
+elif TYPE == "heur":
+    device = qaml.sampler.QASampler.get_device(solver=SOLVER_NAME)
+    batch_embeddings = qaml.minor.harvest_heuristic(bm,device,mask=True)
+    pos_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=True,batch_embeddings=batch_embeddings)
+    TRAIN_BATCH = len(batch_embeddings)
 
-qa_sampler = qaml.sampler.QASampler(bm,solver=solver_name,batch_mode=True)
+    embedding = qaml.minor.miner_heuristic(bm,device)
+    neg_sampler = qaml.sampler.QASampler(bm,embedding=embedding)
+elif TYPE == "pruned":
+    pass
 
-pos_emb = qaml.minor.clique_from_cache()
-pos_sampler = qaml.sampler.BatchQASampler(bm,solver=solver_name)
-
-neg_sampler = qaml.sampler.QASampler(bm,solver=solver_name)
-
-recon_sampler = qaml.sampler.BatchQASampler(bm,fixed_vars=,solver=solver_name)
-
-# Loss and autograd
-ML = qaml.autograd.MaximumLikelihood
-
+TRAIN_BATCH
 #################################### Input Data ################################
 bas_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
 set_label,get_label = qaml.datasets._embed_labels(bas_dataset,setter_getter=True)

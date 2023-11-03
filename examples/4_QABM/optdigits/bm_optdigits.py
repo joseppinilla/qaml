@@ -11,6 +11,10 @@ import torch
 
 import matplotlib.pyplot as plt
 
+# For deterministic weights
+SEED = 42
+torch.manual_seed(SEED)
+
 ################################# Hyperparameters ##############################
 EPOCHS = 5
 M,N = SHAPE = (8,8)
@@ -29,9 +33,6 @@ HIDDEN_SIZE = 16
 # Specify model with dimensions
 bm = qaml.nn.BoltzmannMachine(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
 
-# For deterministic weights
-SEED = 8
-torch.manual_seed(SEED)
 # Initialize biases
 _ = torch.nn.init.uniform_(bm.b,-4.0,4.0)
 _ = torch.nn.init.uniform_(bm.c,-4.0,4.0)
@@ -45,12 +46,24 @@ optimizer = torch.optim.SGD(bm.parameters(),lr=learning_rate,
                             momentum=momentum)
 
 # Set up training mechanisms
+TYPE = "heur"
 SOLVER_NAME = "Advantage_system4.1"
-pos_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=True)
-neg_sampler = qaml.sampler.QASampler(bm,solver=SOLVER_NAME)
-TRAIN_BATCH = len(pos_sampler.batch_embeddings)
+if TYPE == "full":
+    pos_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=True)
+    TRAIN_BATCH = len(pos_sampler.batch_embeddings)
 
-# Loss and autograd
+    neg_sampler = qaml.sampler.QASampler(bm,solver=SOLVER_NAME)
+elif TYPE == "heur":
+    pos_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=True)
+    TRAIN_BATCH = len(pos_sampler.batch_embeddings)
+
+    device = qaml.sampler.QASampler.get_device(solver=SOLVER_NAME)
+    embedding = qaml.minor.miner_heuristic(bm,device)
+    neg_sampler = qaml.sampler.QASampler(bm,embedding=embedding)
+elif TYPE == "pruned":
+    pass
+
+###################################### Autograd ################################
 ML = qaml.autograd.MaximumLikelihood
 
 #################################### Input Data ################################
@@ -62,8 +75,6 @@ train_sampler = torch.utils.data.RandomSampler(opt_train,replacement=False)
 train_loader = torch.utils.data.DataLoader(opt_train,TRAIN_BATCH,sampler=train_sampler)
 
 #################################### Test Data ################################
-
-
 opt_test = qaml.datasets.OptDigits(root='./data/',train=False,download=True,
                                        transform=qaml.datasets.ToSpinTensor())
 qaml.datasets._subset_classes(opt_test,SUBCLASSES)
@@ -71,7 +82,7 @@ set_label,get_label = qaml.datasets._embed_labels(opt_test,encoding='one_hot',
                                                   scale=255,setter_getter=True)
 test_sampler = torch.utils.data.RandomSampler(opt_test,False)
 
-mask = set_label(torch.ones(1,1,bm.V),0)
+mask = set_label(torch.ones(1,*SHAPE),0).flatten()
 rec_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=mask)
 TEST_BATCH = len(rec_sampler.batch_embeddings)
 test_loader = torch.utils.data.DataLoader(opt_test,TEST_BATCH,sampler=test_sampler)
@@ -97,11 +108,21 @@ W_log = [bm.W.detach().clone().numpy().flatten()]
 vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 
+################################ Pre-training ##################################
+count = 0
+for img_batch, label_batch in test_loader:
+    input_data = img_batch.flatten(1)
+    mask = set_label(torch.ones(1,*SHAPE),0).flatten()
+    v_recon,h_recon = rec_sampler(input_data,mask=mask,num_reads=TEST_READS)
+    label_pred = get_label(v_recon.view(-1,*SHAPE))
+    label_true = get_label(img_batch.view(-1,*SHAPE))
+    for recon,input in zip(label_pred,label_true):
+        if (recon==input).all():
+            count+=1
+accuracy_log.append(count/len(opt_test))
+print(f"Testing accuracy: {count}/{len(opt_test)} ({count/len(opt_test):.2f})")
 
-pos_sampler.alpha
-neg_sampler.alpha
 ################################## Model Training ##############################
-%%time
 for t in range(1):
     print(f"Epoch {t}")
     epoch_error = torch.Tensor([0.])
@@ -146,19 +167,18 @@ for t in range(1):
     count = 0
     for img_batch, label_batch in test_loader:
         input_data = img_batch.flatten(1)
-        mask = set_label(torch.ones(1,1,bm.V),0).flatten()
+        mask = set_label(torch.ones(1,*SHAPE),0).flatten()
         v_recon,h_recon = rec_sampler(input_data,mask=mask,num_reads=TEST_READS)
-        label_pred = get_label(v_recon.view(-1,1,*SHAPE))
-        label_true = get_label(img_batch)
+        label_pred = get_label(v_recon.view(-1,*SHAPE))
+        label_true = get_label(img_batch.view(-1,*SHAPE))
         for recon,input in zip(label_pred,label_true):
             if (recon==input).all():
                 count+=1
     accuracy_log.append(count/len(opt_test))
     print(f"Testing accuracy: {count}/{len(opt_test)} ({count/len(opt_test):.2f})")
 
-
 ############################ MODEL VISUALIZATION ###############################
-directory = f"{HIDDEN_SIZE}_batch{TRAIN_BATCH}"
+directory = f"{TYPE}/{HIDDEN_SIZE}_batch{TRAIN_BATCH}"
 
 if not os.path.exists(directory):
         os.makedirs(directory)
@@ -175,6 +195,11 @@ torch.save(batch_err_log,f"./{directory}/{SEED}/batch_err.pt")
 torch.save(pos_scalar_log,f"./{directory}/{SEED}/scalar.pt")
 torch.save(neg_scalar_log,f"./{directory}/{SEED}/scalar.pt")
 torch.save(accuracy_log,f"./{directory}/{SEED}/accuracy.pt")
+
+torch.save(pos_sampler.batch_embeddings,f"./{directory}/{SEED}/pos_embeddings.pt")
+torch.save(dict(neg_sampler.embedding),f"./{directory}/{SEED}/neg_embedding.pt")
+torch.save(dict(rec_sampler.embedding),f"./{directory}/{SEED}/rec_embedding.pt")
+
 
 fig, ax = plt.subplots()
 plt.plot(pos_scalar_log)

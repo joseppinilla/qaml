@@ -4,7 +4,8 @@
 # Required packages
 import qaml
 import torch
-torch.manual_seed(0) # For deterministic weights
+SEED = 0
+torch.manual_seed(SEED) # For deterministic weights
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms

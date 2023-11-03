@@ -32,7 +32,6 @@ def miner_heuristic(model, sampler, mask=None, seed=None):
     T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
     return minorminer.find_embedding(S,T,random_seed=seed)
 
-
 def harvest_cliques(model, sampler, mask=None, seed=None):
     """ Yields embeddings of an N-clique while found.
         Note: This method doesn't guarantee a maximum number of cliques nor that
@@ -45,6 +44,22 @@ def harvest_cliques(model, sampler, mask=None, seed=None):
     Tg = T.copy()
     e_kwargs = {'seed':seed,'use_cache':False}
     while emb:=minorminer.busclique.find_clique_embedding(nodes,Tg,**e_kwargs):
+        for v,chain in emb.items():
+            Tg.remove_nodes_from(chain)
+        yield emb
+
+def harvest_heuristic(model, sampler, mask=None, seed=None):
+    """ Yields embeddings of an N-clique while found.
+        Note: This method doesn't guarantee a maximum number of cliques nor that
+        no other embeddings exist.
+    """
+    if mask is None: mask = []
+    S = model if isinstance(sampler,nx.Graph) else model.to_networkx_graph()
+    fixed_vars = [v for v,m in zip(model.visible,mask) if not m]
+    S.remove_nodes_from(fixed_vars)
+    T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
+    Tg = T.copy()
+    while emb:= minorminer.find_embedding(S,Tg,random_seed=seed):
         for v,chain in emb.items():
             Tg.remove_nodes_from(chain)
         yield emb

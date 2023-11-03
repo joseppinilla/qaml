@@ -14,11 +14,11 @@ HIDDEN_SIZE = 7
 bm = qaml.nn.BoltzmannMachine(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
 torch.save(bm.to_networkx_graph(),'./source.pt')
 
-############################ Systematic Embedding ##############################
+############################# Heuristic Embedding ##############################
 embedding = qaml.minor.miner_heuristic(bm,device,seed=SEED)
 torch.save(embedding,'./embedding_heur_176.pt')
 
-############################# Heuristic Embedding ##############################
+############################ Systematic Embedding ##############################
 sys_sampler = qaml.sampler.QASampler(bm)
 torch.save(dict(sys_sampler.embedding),'./embedding_sys_176.pt')
 

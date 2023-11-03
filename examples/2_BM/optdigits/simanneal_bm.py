@@ -26,9 +26,9 @@ learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
-POS_READS =10
-NEG_READS = 10000
-TEST_READS = 100
+POS_READS =5
+NEG_READS = 10
+TEST_READS = 10
 
 ################################# Model Definition #############################
 VISIBLE_SIZE = M*N
@@ -85,7 +85,21 @@ W_log = [bm.W.detach().clone().numpy().flatten()]
 vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 
+# Pre-training Classification
+count = 0
+tests = len(opt_test)
+for test_data, test_label in opt_test:
+    input_data =  test_data.flatten(1)
+    mask = set_label(torch.ones_like(test_data),0).flatten()
+    v_recon,h_recon = sa_sampler(input_data,mask=mask,k=5)
+    label_pred = get_label(v_recon.view(-1,*SHAPE))
+    if label_pred.argmax() == get_label(test_data).argmax():
+        count+=1
+accuracy_log.append(count/tests)
+print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
+
 ################################## Model Training ##############################
+%%time
 for t in range(1):
     print(f"Epoch {t}")
     epoch_error = torch.Tensor([0.])
@@ -123,6 +137,21 @@ for t in range(1):
     err_log.append(epoch_error.item())
     print(f"Reconstruction Error = {epoch_error.item()}")
 
+    # Classification
+    count = 0
+    tests = len(opt_test)
+    for test_data, test_label in opt_test:
+        input_data =  test_data.flatten(1)
+        mask = set_label(torch.ones_like(test_data),0).flatten()
+        v_recon,h_recon = sa_sampler(input_data,mask=mask,k=5)
+        label_pred = get_label(v_recon.view(-1,*SHAPE))
+        if label_pred.argmax() == get_label(test_data).argmax():
+            count+=1
+    accuracy_log.append(count/tests)
+    print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
+
+
+
 # VISIBLE = 64
 # HIDDEN = 16
 # Epoch 0
@@ -136,16 +165,3 @@ for ax,img in zip(axs.flat,vk):
     ax.matshow(img.view(*SHAPE))
     ax.axis('off')
 plt.tight_layout()
-
-# Classification
-count = 0
-tests = len(opt_test)
-for test_data, test_label in opt_test:
-    input_data =  test_data.flatten(1)
-    mask = set_label(torch.ones_like(test_data),0).flatten()
-    v_recon,h_recon = sa_sampler(input_data,mask=mask,k=5)
-    label_pred = get_label(v_recon.view(-1,*SHAPE))
-    if label_pred.argmax() == get_label(test_data).argmax():
-        count+=1
-accuracy_log.append(count/tests)
-print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")

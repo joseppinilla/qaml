@@ -28,6 +28,33 @@ def plot_compare(plot_data,metric):
                      err_kws={"alpha":0.15})
     plt.legend(framealpha=0.5)
 
+################################# BM OptDigits #################################
+EXPERIMENT = "BM_OptDigits"
+SUBDIR = "4_QABM/optdigits"
+METRICS = [('accuracy','Testing Accuracy'),
+            ("err","Reconstruction Error"),]
+
+PLOT_DATA = [(f'{SUBDIR}/heur/16_batch84','Heuristic'),
+             (f'{SUBDIR}/full/16_batch84','Systematic')]
+
+if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
+for metric,label in METRICS:
+    plot_compare(PLOT_DATA,(metric,label))
+
+####################### BM Complete vs Heuristic BAS ###########################
+EXPERIMENT = "BM_Complete_v_Heuristic"
+SUBDIR = "4_QABM/bas"
+METRICS = [('accuracy','Testing Accuracy'),
+            ("err","Reconstruction Error"),]
+
+PLOT_DATA = [(f'{SUBDIR}/full/16_batch83','Complete'),
+             (f'{SUBDIR}/heur/16_batch84','Heuristic')]
+
+if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
+for metric,label in METRICS:
+    plot_compare(PLOT_DATA,(metric,label))
+    plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
+
 
 ############################### Exact v Quantum ################################
 EXPERIMENT = "BM_Exact_v_Quantum"
@@ -57,8 +84,8 @@ for metric,label in METRICS:
     plot_compare(PLOT_DATA,(metric,label))
     plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
 
-########################### Complete vs Heuristic ##############################
-EXPERIMENT = "Complete_v_Heuristic"
+######################### RBM Complete vs Heuristic ############################
+EXPERIMENT = "RBM_Complete_v_Heuristic"
 SUBDIR = "3_QARBM/optdigits/64x64"
 METRICS = [('accuracy','Testing Accuracy'),
             ("err","Reconstruction Error"),]
