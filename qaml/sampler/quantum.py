@@ -7,11 +7,19 @@ import dwave.embedding
 import dwave.preprocessing
 
 import numpy as np
+import dwave_networkx as dnx
 
-from dwave.system import FixedEmbeddingComposite
-from qaml.sampler.base import BinaryQuadraticModelNetworkSampler
 from dwave.preprocessing import ScaleComposite
+from dwave.system import FixedEmbeddingComposite
 
+from qaml.sampler.base import BinaryQuadraticModelNetworkSampler
+from qaml.composites import SpinReversalTransformComposite, LenientFixedEmbeddingComposite
+
+def DummySampler(device):
+    target = device.to_networkx_graph()
+    nodelist = target.nodes
+    edgelist = target.edges
+    return dimod.StructureComposite(dimod.RandomSampler(),nodelist,edgelist)
 
 class QuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
 
@@ -35,7 +43,6 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
         BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
         self.auto_scale = auto_scale
-
         self.device = self.get_device(failover,retry_interval,**conf)
         # If embedding not provided. Allows empty embedding {}
         if embedding is None:
@@ -47,16 +54,12 @@ class QuantumAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
                 embedding = qaml.minor.clique_from_cache(model,self,mask)
             assert embedding, "Embedding not found"
 
+        # Embedded structures have some useful methods
         edgelist = self.to_networkx_graph().edges
         self.embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
 
-        if test:
-            print('TEST MODE ON')
-            child = DummySampler(self.device)
-        else:
-            child = self.device
-            self.child = SpinReversalTransformComposite(
-
+        child = DummySampler(self.device) if test else self.device
+        self.child = SpinReversalTransformComposite(
                         FixedEmbeddingComposite(
                             ScaleComposite(child),
                             self.embedding,scale_aware=True))
@@ -83,7 +86,6 @@ class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
         BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
         self.auto_scale = auto_scale
-
         self.device = self.get_device(failover,retry_interval,**conf)
 
         if batch_embeddings is None:
@@ -168,182 +170,58 @@ class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
 
 BatchQASampler = BatchQuantumAnnealingNetworkSampler
 
-def DummySampler(device):
-    target = device.to_networkx_graph()
-    nodelist = target.nodes
-    edgelist = target.edges
-    return dimod.StructureComposite(dimod.RandomSampler(),nodelist,edgelist)
+class AdachiQASampler(QuantumAnnealingNetworkSampler):
+    """ Prune (currently unpruned) units in a tensor from D-Wave graph using the
+    method in [1-2]. Prune only disconnected edges.
 
+    [1] Adachi, S. H., & Henderson, M. P. (2015). Application of Quantum
+    Annealing to Training of Deep Neural Networks.
+    https://doi.org/10.1038/nature10012
 
-import typing
-
-class SpinReversalTransformComposite(dimod.core.Sampler, dimod.core.Composite):
-    """NOTE: MODIFIED TO PRESERVE SAMPLESET INFO
-
-    Composite for applying spin reversal transform preprocessing.
-
-    Spin reversal transforms (or "gauge transformations") are applied
-    by randomly flipping the spin of variables in the Ising problem. After
-    sampling the transformed Ising problem, the same bits are flipped in the
-    resulting sample [#km]_.
-
-    Args:
-        sampler: A `dimod` sampler object.
-
-        seed: As passed to :class:`numpy.random.default_rng`.
-
-    Examples:
-        This example composes a dimod ExactSolver sampler with spin transforms then
-        uses it to sample an Ising problem.
-
-        >>> from dimod import ExactSolver
-        >>> from dwave.preprocessing.composites import SpinReversalTransformComposite
-        >>> base_sampler = ExactSolver()
-        >>> composed_sampler = SpinReversalTransformComposite(base_sampler)
-        ... # Sample an Ising problem
-        >>> response = composed_sampler.sample_ising({'a': -0.5, 'b': 1.0}, {('a', 'b'): -1})
-        >>> response.first.sample
-        {'a': -1, 'b': -1}
-
-    References
-    ----------
-    .. [#km] Andrew D. King and Catherine C. McGeoch. Algorithm engineering
-        for a quantum annealing platform. https://arxiv.org/abs/1410.2628,
-        2014.
+    [2] Job, J., & Adachi, S. (2020). Systematic comparison of deep belief
+    network training using quantum annealing vs. classical techniques.
+    http://arxiv.org/abs/2009.00134
 
     """
-    _children: typing.List[dimod.core.Sampler]
-    _parameters: typing.Dict[str, typing.Sequence[str]]
-    _properties: typing.Dict[str, typing.Any]
 
-    def __init__(self, child: dimod.core.Sampler, *, seed=None):
-        self._child = child
-        self.rng = np.random.default_rng(seed)
+    def __init__(self, model, embedding=None, mask=None, auto_scale=True,
+                 beta=1.0, failover=False, retry_interval=-1, test=False, **config):
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
-    @property
-    def children(self) -> typing.List[dimod.core.Sampler]:
-        try:
-            return self._children
-        except AttributeError:
-            pass
+        self.auto_scale = auto_scale
+        self.device = self.get_device(failover,retry_interval,**config)
 
-        self._children = children = [self._child]
-        return children
+        template_graph = self.get_template_graph()
 
-    @property
-    def parameters(self) -> typing.Dict[str, typing.Sequence[str]]:
-        try:
-            return self._parameters
-        except AttributeError:
-            pass
+        if embedding is None:
+            # Try biclique if RBM
+            if 'Restricted' in str(model):
+                embedding = qaml.minor.biclique_from_cache(model,template_graph,mask)
+            # Try clique otherwise and if biclique fails
+            if not embedding:
+                embedding = qaml.minor.clique_from_cache(model,template_graph,mask)
+            assert embedding, "Embedding not found"
 
-        self._parameters = parameters = dict(spin_reversal_variables=tuple())
-        parameters.update(self._child.parameters)
-        return parameters
+        # Embedded structures have some useful methods
+        edgelist = template_graph.edges
+        embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
+        self.embedding_orig = embedding
 
-    @property
-    def properties(self) -> typing.Dict[str, typing.Any]:
-        try:
-            return self._properties
-        except AttributeError:
-            pass
+        child = DummySampler(self.device) if test else self.device
+        self.child = SpinReversalTransformComposite(
+                        LenientFixedEmbeddingComposite(
+                            ScaleComposite(child),
+                            embedding,scale_aware=True))
+        self.embedding = self.child.child.embedding
 
-        self._properties = dict(child_properties=self._child.properties)
-        return self._properties
-
-    class _SampleSets:
-        def __init__(self, samplesets: typing.List[dimod.SampleSet]):
-            self.samplesets = samplesets
-
-        def done(self) -> bool:
-            return all(ss.done() for ss in self.samplesets)
-
-    @dimod.decorators.nonblocking_sample_method
-    def sample(self, bqm: dimod.BinaryQuadraticModel, *,
-               num_spin_reversal_transforms: int = 1,
-               **kwargs,
-               ):
-        """Sample from the binary quadratic model.
-
-        Args:
-            bqm: Binary quadratic model to be sampled from.
-
-            num_spin_reversal_transforms:
-                Number of spin reversal transform runs.
-                A value of ``0`` will not transform the problem.
-                If you specify a nonzero value, each spin reversal transform
-                will result in an independent run of the child sampler.
-
-        Returns:
-            A sample set. Note that for a sampler that returns ``num_reads`` samples,
-            the sample set will contain ``num_reads*num_spin_reversal_transforms`` samples.
-
-        Examples:
-            This example runs 100 spin reversals applied to one variable of a QUBO problem.
-
-            >>> from dimod import ExactSolver
-            >>> from dwave.preprocessing.composites import SpinReversalTransformComposite
-            >>> base_sampler = ExactSolver()
-            >>> composed_sampler = SpinReversalTransformComposite(base_sampler)
-            ...
-            >>> Q = {('a', 'a'): -1, ('b', 'b'): -1, ('a', 'b'): 2}
-            >>> response = composed_sampler.sample_qubo(Q,
-            ...               num_spin_reversal_transforms=100)
-            >>> len(response)
-            400
-        """
-        sampler = self._child
-        # No SRTs, so just pass the problem through
-        if not num_spin_reversal_transforms or not bqm.num_variables:
-            sampleset = sampler.sample(bqm, **kwargs)
-            # yield twice because we're using the @nonblocking_sample_method
-            yield sampleset  # this one signals done()-ness
-            yield sampleset  # this is the one actually used by the user
-            return
-
-        # we'll be modifying the BQM, so make a copy
-        bqm = bqm.copy()
-
-        # We maintain the Leap behavior that num_spin_reversal_transforms == 1
-        # corresponds to a single problem with randomly flipped variables.
-
-        # Get the SRT matrix
-        SRT = self.rng.random((num_spin_reversal_transforms, bqm.num_variables)) > .5
-
-        # Submit the problems
-        samplesets: typing.List[dimod.SampleSet] = []
-        flipped = np.zeros(bqm.num_variables, dtype=bool)  # what variables are currently flipped
-        for i in range(num_spin_reversal_transforms):
-            # determine what needs to be flipped
-            transform = flipped != SRT[i, :]
-
-            # apply the transform
-            for v, flip in zip(bqm.variables, transform):
-                if flip:
-                    bqm.flip_variable(v)
-            flipped[transform] = ~flipped[transform]
-            sampleset = sampler.sample(bqm, **kwargs)
-            samplesets.append(sampleset)
-
-        # Yield a view of the samplesets that reports done()-ness
-        yield self._SampleSets(samplesets)
-
-        # Undo the SRTs according to vartype
-        if bqm.vartype is dimod.Vartype.BINARY:
-            for i, sampleset in enumerate(samplesets):
-                sampleset.record.sample[:, SRT[i, :]] = 1 - sampleset.record.sample[:, SRT[i, :]]
-        elif bqm.vartype is dimod.Vartype.SPIN:
-            for i, sampleset in enumerate(samplesets):
-                sampleset.record.sample[:, SRT[i, :]] *= -1
+    def get_template_graph(self):
+        topology_type = self.device.properties['topology']['type']
+        shape = self.device.properties['topology']['shape']
+        if topology_type == 'zephyr':
+            return dnx.zephyr_graph(*shape)
+        elif topology_type == 'pegasus':
+            return dnx.pegasus_graph(*shape)
+        elif topology_type == 'chimera':
+            return dnx.chimera_graph(*shape)
         else:
-            raise RuntimeError("unexpected vartype")
-
-        # Preserves embedding_context and scalar which is the same for all
-        # {'embedding_context', 'problem_id', 'problem_label', 'scalar', 'timing'}
-        info = {'scalar':samplesets[0].info['scalar'],
-                'embedding_context':samplesets[0].info['embedding_context']}
-
-        # finally combine all samplesets together
-        response = dimod.concatenate(samplesets)
-        response.info.update(info)
-        yield response
+            raise RuntimeError("Sampler `topology_type` not compatible.")

@@ -9,6 +9,8 @@ import os
 import qaml
 import torch
 
+import matplotlib.pyplot as plt
+
 ################################# Hyperparameters ##############################
 EPOCHS = 75
 M,N = SHAPE = (8,8)
@@ -23,11 +25,11 @@ momentum = 0.5
 
 # Set up training mechanisms
 method = 'vanilla'
-solver_name = "Advantage_system6.2"
+solver_name = "Advantage_system4.1"
 sampler_kwargs = {'auto_scale':True,'num_spin_reversal_transforms':4}
 
 # Deterministic results
-SEED = 3
+SEED = 25
 _ = torch.manual_seed(SEED)
 
 #################################### Input Data ################################
@@ -62,12 +64,13 @@ CD = qaml.autograd.ContrastiveDivergence
 
 # Set up training mechanisms
 verbose = True
+method = 'adachi'
 if method == 'vanilla':
     neg_sampler = qaml.sampler.QASampler(rbm,beta=beta,solver=solver_name,test=True)
 
 elif method == 'adachi':
-    qa_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
-    _ = qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler,verbose)
+    neg_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
+    _ = qaml.prune.adaptive_unstructured(rbm,'W',neg_sampler,verbose)
 
 elif method == 'adaptive':
     qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
@@ -105,9 +108,23 @@ b_log = [rbm.b.detach().clone().numpy()]
 c_log = [rbm.c.detach().clone().numpy()]
 W_log = [rbm.W.detach().clone().numpy()]
 
+############################## Pre-training ##########################
+pos_sampler.beta.data = torch.tensor(beta*neg_sampler.alpha)
+count = 0
+tests = len(opt_test)
+for test_data, test_label in opt_test:
+    input_data =  test_data.flatten(1)
+    mask = set_label(torch.ones_like(test_data),0).flatten()
+    v_recon,h_recon = pos_sampler.reconstruct(input_data,mask=mask,k=5)
+    label_pred = get_label(v_recon.view(-1,*SHAPE))
+    if label_pred.argmax() == get_label(test_data).argmax():
+        count+=1
+accuracy_log.append(count/tests)
+print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
+
 ################################## Model Training ##############################
 rbm.train()
-for t in range(1):
+for t in range(10):
     print(f"Epoch {t}")
     epoch_error = torch.Tensor([0.])
     epoch_kl_div = torch.Tensor([0.])
@@ -118,7 +135,7 @@ for t in range(1):
         vk, hk = neg_sampler(num_reads=BATCH_SIZE,**sampler_kwargs)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,beta*neg_sampler.scalar)
+        v0, prob_h0 = input_data, rbm(input_data,beta*neg_sampler.alpha)
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply(neg_sampler,(v0,prob_h0), (vk,hk), *rbm.parameters())
@@ -129,8 +146,6 @@ for t in range(1):
         # Compute gradients
         err.backward()
 
-        print(rbm.W.grad)
-
         # Update parameters
         optimizer.step()
 
@@ -139,7 +154,7 @@ for t in range(1):
         epoch_kl_div += qaml.perf.free_energy_smooth_kl(rbm,v0,vk)
 
     # Parameter log
-    scalar_log.append(qa_sampler.scalar)
+    scalar_log.append(neg_sampler.alpha)
     b_log.append(rbm.b.detach().clone().numpy())
     c_log.append(rbm.c.detach().clone().numpy())
     W_log.append(rbm.W.detach().clone().numpy())
@@ -150,7 +165,7 @@ for t in range(1):
     print(f"Reconstruction Error = {epoch_error.item()}")
 
     ############################## Classification ##########################
-    pos_sampler.beta.data = torch.tensor(beta*qa_sampler.scalar)
+    pos_sampler.beta.data = torch.tensor(beta*neg_sampler.alpha)
     count = 0
     tests = len(opt_test)
     for test_data, test_label in opt_test:
@@ -172,3 +187,23 @@ torch.save(err_log,f"./{directory}/err.pt")
 torch.save(kl_div_log,f"./{directory}/kl_div.pt")
 torch.save(scalar_log,f"./{directory}/scalar.pt")
 torch.save(accuracy_log,f"./{directory}/accuracy.pt")
+
+# Testing accuracy graph
+fig, ax = plt.subplots()
+plt.plot(accuracy_log)
+plt.ylabel("Testing Accuracy")
+plt.xlabel("Epoch")
+
+
+# KL-Divergence
+fig, ax = plt.subplots()
+plt.plot(kl_div_log)
+plt.ylabel("KL Divergence")
+plt.xlabel("Epoch")
+
+
+# Error graph
+fig, ax = plt.subplots()
+plt.plot(err_log)
+plt.ylabel("Reconstruction Error")
+plt.xlabel("Epoch")
