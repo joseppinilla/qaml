@@ -5,14 +5,14 @@
 import os
 import qaml
 import torch
-SEED = 42
+SEED = 8
 torch.manual_seed(SEED) # For deterministic weights
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-EPOCHS = 100
+EPOCHS = 30
 M,N = SHAPE = (6,6)
 DATA_SIZE = N*M
 SUBCLASSES = [1,2]
@@ -22,25 +22,7 @@ learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
-TRAIN_READS = 10
-
-#################################### Input Data ################################
-train_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
-set_label,get_label = qaml.datasets._embed_labels(train_dataset,
-                                                  encoding='binary',
-                                                  setter_getter=True)
-qaml.datasets._subset_classes(train_dataset,SUBCLASSES)
-train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
-train_loader = torch.utils.data.DataLoader(train_dataset,sampler=train_sampler)
-
-# PLot all data
-fig,axs = plt.subplots(4,4)
-for ax,(img,label) in zip(axs.flat,train_loader):
-    ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
-plt.tight_layout()
-plt.savefig("dataset.svg")
-
-TEST_READS = (len(train_dataset)*2)
+TRAIN_READS = 100
 
 ################################# Model Definition #############################
 VISIBLE_SIZE = DATA_SIZE
@@ -56,10 +38,34 @@ optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
 
 # Set up training mechanisms
-sa_sampler = qaml.sampler.SimulatedAnnealingNetworkSampler(bm)
+SOLVER_NAME = "Advantage_system4.1"
+pos_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=True)
+POS_BATCH = len(pos_sampler.batch_embeddings)
+neg_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME)
+NEG_BATCH = len(neg_sampler.batch_embeddings)
+
 ML = qaml.autograd.MaximumLikelihood
 
+#################################### Input Data ################################
+train_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
+set_label,get_label = qaml.datasets._embed_labels(train_dataset,
+                                                  encoding='binary',
+                                                  setter_getter=True)
+qaml.datasets._subset_classes(train_dataset,SUBCLASSES)
+train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
+train_loader = torch.utils.data.DataLoader(train_dataset,POS_BATCH,sampler=train_sampler)
 
+# PLot all data
+fig,axs = plt.subplots(4,4)
+for batch_img,batch_label in train_loader:
+    for ax,img,label in zip(axs.flat,batch_img,batch_label):
+        ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
+plt.tight_layout()
+plt.savefig("dataset.svg")
+
+TEST_READS = (len(train_dataset)*2)
+
+################################## Pre-Training ################################
 # Set the model to training mode
 bm.train()
 p_log = []
@@ -73,28 +79,26 @@ W_log = [bm.W.detach().clone().numpy().flatten()]
 vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 
-
-################################## Pre-Training ################################
 # BAS score
-vk,_ = sa_sampler(num_reads=TEST_READS)
+vk,_ = neg_sampler(num_reads=TEST_READS)
 precision, recall, score = train_dataset.score(((vk+1)/2).view(-1,*SHAPE))
 p_log.append(precision); r_log.append(recall); score_log.append(score)
 print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
 ################################## Model Training ##############################
-for t in range(EPOCHS):
+for t in range(30):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
         input_data = img_batch.view(1,-1)
 
         # Positive Phase
-        v0, h0 = sa_sampler(input_data.detach(),num_reads=TRAIN_READS)
+        v0, h0 = pos_sampler(input_data.detach(),num_reads=TRAIN_READS)
         # Negative Phase
-        vk, hk = sa_sampler(num_reads=TRAIN_READS)
+        vk, hk = neg_sampler(num_reads=TRAIN_READS)
 
         # Reconstruction error from Contrastive Divergence
-        err = ML.apply(sa_sampler,(v0,h0),(vk,hk), *bm.parameters())
+        err = ML.apply(neg_sampler,(v0,h0),(vk,hk), *bm.parameters())
 
         # Do not accumulate gradients
         optimizer.zero_grad()
@@ -119,14 +123,14 @@ for t in range(EPOCHS):
     epoch_err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
     # BAS score
-    vk,_ = sa_sampler(num_reads=TEST_READS)
+    vk,_ = neg_sampler(num_reads=TEST_READS)
     precision, recall, score = train_dataset.score(((vk+1)/2).view(-1,*SHAPE))
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
 directory = f"bm{VISIBLE_SIZE}_{HIDDEN_SIZE}-10_100/{prune}"
 os.makedirs(f'{directory}/{SEED}',exist_ok=True)
-print(directory,SEED)
+
 torch.save(err_log,f'{directory}/{SEED}/err_log_{TRAIN_READS}.pt')
 torch.save(p_log,f'{directory}/{SEED}/p_log_{TRAIN_READS}.pt')
 torch.save(r_log,f'{directory}/{SEED}/r_log_{TRAIN_READS}.pt')

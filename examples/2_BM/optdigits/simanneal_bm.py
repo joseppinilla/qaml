@@ -26,7 +26,7 @@ learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
-POS_READS =5
+POS_READS = 5
 NEG_READS = 10
 TEST_READS = 10
 
@@ -100,7 +100,7 @@ print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
 
 ################################## Model Training ##############################
 %%time
-for t in range(1):
+for t in range(74):
     print(f"Epoch {t}")
     epoch_error = torch.Tensor([0.])
     for img_batch, labels_batch in train_loader:

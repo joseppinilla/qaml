@@ -13,6 +13,7 @@ def plot_compare(plot_data,metric):
         logs = []
         for seed in os.listdir(abspath):
             filepath = f"{abspath}/{seed}/{metric}.pt"
+            print(f"Checking: {filepath}")
             if seed.isnumeric():
                 if os.path.exists(filepath):
                     logs.append(torch.load(filepath))
@@ -27,6 +28,23 @@ def plot_compare(plot_data,metric):
         sns.lineplot(x="Epoch",y=value_name,data=df,ci="sd",label=label,
                      err_kws={"alpha":0.15})
     plt.legend(framealpha=0.5)
+
+################################# BM BAS #################################
+EXPERIMENT = "BM_BAS"
+SUBDIR = "2_BM/bas"
+METRICS = [#("err_log_10","Reconstruction Error"),
+            ("p_log_10","Precision"),
+            ("r_log_10","Recall"),
+            ("score_log_10","Score"),]
+
+PLOT_DATA = [(f'{SUBDIR}/bm36_16-10_100/full/','Full'),
+             (f'{SUBDIR}/bm36_16-10_100/0.8/','0.8'),
+             (f'{SUBDIR}/bm36_16-10_100/0.7/','0.7'),]
+
+if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
+for metric,label in METRICS:
+    plot_compare(PLOT_DATA,(metric,label))
+
 
 ################################# BM OptDigits #################################
 EXPERIMENT = "BM_OptDigits"
