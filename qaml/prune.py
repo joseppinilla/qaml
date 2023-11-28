@@ -88,6 +88,7 @@ class PriorityUnstructured(BasePruningMethod):
                 p_chain = temp_embedding[p]
                 temp_embedding[v] = p_chain
                 temp_embedding[p] = v_chain
+                print(f"Swapped {v} to {p}")
 
         edgelist = self.sampler.networkx_graph.edges
         embedding = dwave.embedding.EmbeddedStructure(edgelist,temp_embedding)

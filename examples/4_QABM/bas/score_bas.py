@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-EPOCHS = 30
+EPOCHS = 50
 M,N = SHAPE = (6,6)
 DATA_SIZE = N*M
 SUBCLASSES = [1,2]
@@ -31,8 +31,8 @@ HIDDEN_SIZE = 16
 # Specify model with dimensions
 bm = qaml.nn.BM(VISIBLE_SIZE, HIDDEN_SIZE, 'SPIN')
 
-prune = "full"
-# torch.nn.utils.prune.random_unstructured(bm,'W',prune)
+prune = 0.8
+torch.nn.utils.prune.random_unstructured(bm,'W',prune)
 # Set up optimizer
 optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
@@ -54,7 +54,7 @@ set_label,get_label = qaml.datasets._embed_labels(train_dataset,
 qaml.datasets._subset_classes(train_dataset,SUBCLASSES)
 train_sampler = torch.utils.data.RandomSampler(train_dataset,replacement=False)
 train_loader = torch.utils.data.DataLoader(train_dataset,POS_BATCH,sampler=train_sampler)
-
+TEST_READS = len(train_dataset)
 # PLot all data
 fig,axs = plt.subplots(4,4)
 for batch_img,batch_label in train_loader:
@@ -63,7 +63,34 @@ for batch_img,batch_label in train_loader:
 plt.tight_layout()
 plt.savefig("dataset.svg")
 
-TEST_READS = (len(train_dataset)*2)
+# PLot batch_embeddings
+import matplotlib.cm
+import dwave_networkx as dnx
+from dwave_networkx.drawing.distinguishable_colors import distinguishable_color_map
+
+plot_batch_embeddings(neg_sampler.batch_embeddings,pos_sampler.to_networkx_graph())
+plt.savefig("./embedding_10.svg")
+
+def plot_batch_embeddings(batch_embeddings,solver_graph):
+
+    batches = {v:list(x for chain in embedding.values() for x in chain) for v,embedding in enumerate(batch_embeddings)}
+    # n = len(batches)
+    # color = distinguishable_color_map(int(n))
+    # chain_color = {v: color(i/n) for i, v in enumerate(batches)}
+    _ = plt.figure(figsize=(16,16))
+    dnx.draw_pegasus_embedding(solver_graph,batches,node_size=10)
+
+################################### load Model #################################
+# b_log = torch.load(f'{directory}/{SEED}/b_log.pt')
+# c_log = torch.load(f'{directory}/{SEED}/c_log.pt')
+# vv_log = torch.load(f'{directory}/{SEED}/vv_log.pt')
+# hh_log = torch.load(f'{directory}/{SEED}/hh_log.pt')
+# W_log = torch.load(f'{directory}/{SEED}/W_log.pt')
+# err_log = torch.load(f'{directory}/{SEED}/err_log.pt')
+# p_log = torch.load(f'{directory}/{SEED}/p_log.pt')
+# r_log = torch.load(f'{directory}/{SEED}/r_log.pt')
+# score_log = torch.load(f'{directory}/{SEED}/score_log.pt')
+# epoch_err_log = torch.load(f'{directory}/{SEED}/epoch_err_log.pt')
 
 ################################## Pre-Training ################################
 # Set the model to training mode
@@ -86,7 +113,7 @@ p_log.append(precision); r_log.append(recall); score_log.append(score)
 print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
 ################################## Model Training ##############################
-for t in range(30):
+for t in range(10):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
@@ -128,53 +155,59 @@ for t in range(30):
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-directory = f"bm{VISIBLE_SIZE}_{HIDDEN_SIZE}-10_100/{prune}"
+len(score_log)
+directory = f"bm{VISIBLE_SIZE}_{HIDDEN_SIZE}-{TRAIN_READS}/{prune}"
 os.makedirs(f'{directory}/{SEED}',exist_ok=True)
 
-torch.save(err_log,f'{directory}/{SEED}/err_log_{TRAIN_READS}.pt')
-torch.save(p_log,f'{directory}/{SEED}/p_log_{TRAIN_READS}.pt')
-torch.save(r_log,f'{directory}/{SEED}/r_log_{TRAIN_READS}.pt')
-torch.save(score_log,f'{directory}/{SEED}/score_log_{TRAIN_READS}.pt')
-torch.save(epoch_err_log,f'{directory}/{SEED}/epoch_err_log_{TRAIN_READS}.pt')
+torch.save(b_log,f'{directory}/{SEED}/b_log.pt')
+torch.save(c_log,f'{directory}/{SEED}/c_log.pt')
+torch.save(vv_log,f'{directory}/{SEED}/vv_log.pt')
+torch.save(hh_log,f'{directory}/{SEED}/hh_log.pt')
+torch.save(W_log,f'{directory}/{SEED}/W_log.pt')
+torch.save(err_log,f'{directory}/{SEED}/err_log.pt')
+torch.save(p_log,f'{directory}/{SEED}/p_log.pt')
+torch.save(r_log,f'{directory}/{SEED}/r_log.pt')
+torch.save(score_log,f'{directory}/{SEED}/score_log.pt')
+torch.save(epoch_err_log,f'{directory}/{SEED}/epoch_err_log.pt')
 
 # Samples
 fig,axs = plt.subplots(4,4)
 for ax,img in zip(axs.flat,vk):
     ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
 plt.tight_layout()
-plt.savefig(f"{directory}/{SEED}/sample_vk_{TRAIN_READS}.svg")
+plt.savefig(f"{directory}/{SEED}/sample_vk.svg")
 
 # Precision graph
 fig, ax = plt.subplots()
 ax.plot(p_log)
 plt.ylabel("Precision")
 plt.xlabel("Epoch")
-plt.savefig(f"{directory}/{SEED}/precision_{TRAIN_READS}.svg")
+plt.savefig(f"{directory}/{SEED}/precision.svg")
 
 # Recall graph
 fig, ax = plt.subplots()
 ax.plot(r_log)
 plt.ylabel("Recall")
 plt.xlabel("Epoch")
-plt.savefig(f"{directory}/{SEED}/recall_{TRAIN_READS}.svg")
+plt.savefig(f"{directory}/{SEED}/recall.svg")
 
 # Score graph
 fig, ax = plt.subplots()
 ax.plot(score_log)
 plt.ylabel("Score")
 plt.xlabel("Epoch")
-plt.savefig(f"{directory}/{SEED}/score_{TRAIN_READS}.svg")
+plt.savefig(f"{directory}/{SEED}/score.svg")
 
 # Iteration Error
 fig, ax = plt.subplots()
 ax.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-plt.savefig(f"{directory}/{SEED}/err_{TRAIN_READS}.svg")
+plt.savefig(f"{directory}/{SEED}/err.svg")
 
 # Epoch Error
 fig, ax = plt.subplots()
 ax.plot(epoch_err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-plt.savefig(f"{directory}/{SEED}/epoch_err_{TRAIN_READS}.svg")
+plt.savefig(f"{directory}/{SEED}/epoch_err.svg")

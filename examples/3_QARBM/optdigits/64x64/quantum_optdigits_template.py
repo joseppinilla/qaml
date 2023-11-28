@@ -24,12 +24,11 @@ weight_decay = 1e-4
 momentum = 0.5
 
 # Set up training mechanisms
-method = 'vanilla'
 solver_name = "Advantage_system4.1"
 sampler_kwargs = {'auto_scale':True,'num_spin_reversal_transforms':4}
 
 # Deterministic results
-SEED = 25
+SEED = 125
 _ = torch.manual_seed(SEED)
 
 #################################### Input Data ################################
@@ -64,7 +63,7 @@ CD = qaml.autograd.ContrastiveDivergence
 
 # Set up training mechanisms
 verbose = True
-method = 'adachi'
+method = 'repurpose'
 if method == 'vanilla':
     neg_sampler = qaml.sampler.QASampler(rbm,beta=beta,solver=solver_name,test=True)
 
@@ -73,23 +72,24 @@ elif method == 'adachi':
     _ = qaml.prune.adaptive_unstructured(rbm,'W',neg_sampler,verbose)
 
 elif method == 'adaptive':
-    qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
-    _ = qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler,verbose)
+    neg_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
+    _ = qaml.prune.adaptive_unstructured(rbm,'W',neg_sampler,verbose)
 
-elif method == 'priority': #TODO: argument should be mask, not list
+elif method == 'priority':
     priority = set_label(torch.zeros(1,*SHAPE),1).flatten()
-    qa_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
-    _ = qaml.prune.priority_unstructured(rbm,'W',qa_sampler,priority,verbose)
+    neg_sampler = qaml.sampler.AdaptiveQASampler(rbm,solver=solver_name,beta=beta)
+    _ = qaml.prune.priority_unstructured(rbm,'W',neg_sampler,priority,verbose)
 
 elif method == 'repurpose':
-    qa_sampler = qaml.sampler.RepurposeQASampler(rbm,solver=solver_name,beta=beta)
-    _ = qaml.prune.adaptive_unstructured(rbm,'W',qa_sampler,verbose)
+    neg_sampler = qaml.sampler.RepurposeQASampler(rbm,solver=solver_name,beta=beta)
+    _ = qaml.prune.adaptive_unstructured(rbm,'W',neg_sampler,verbose)
 
-elif method == 'heuristic':
-    qa_sampler = qaml.sampler.QASampler(rbm,{},beta,solver=solver_name)
-    qa_sampler.set_embedding(qaml.minor.miner_heuristic(rbm,qa_sampler,SEED))
+# elif method == 'heuristic':
+    # neg_sampler = qaml.sampler.QASampler(rbm,{},beta,solver=solver_name)
+    # neg_sampler.set_embedding(qaml.minor.miner_heuristic(rbm,neg_sampler,SEED))
 
 pos_sampler =  qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
+
 
 ################################## Training Log ################################
 
@@ -124,7 +124,7 @@ print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
 
 ################################## Model Training ##############################
 rbm.train()
-for t in range(10):
+for t in range(1):
     print(f"Epoch {t}")
     epoch_error = torch.Tensor([0.])
     epoch_kl_div = torch.Tensor([0.])
@@ -171,12 +171,14 @@ for t in range(10):
     for test_data, test_label in opt_test:
         input_data =  test_data.flatten(1)
         mask = set_label(torch.ones_like(test_data),0).flatten()
-        v_recon,h_recon = pos_sampler.reconstruct(input_data,mask=mask,k=5)
+        v_recon,h_recon = pos_sampler.reconstruct(input_data,mask=mask,k=1)
         label_pred = get_label(v_recon.view(-1,*SHAPE))
         if label_pred.argmax() == get_label(test_data).argmax():
             count+=1
     accuracy_log.append(count/tests)
     print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
+
+
 
 # %%
 ########################### Save model and results #############################
@@ -207,3 +209,10 @@ fig, ax = plt.subplots()
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
+
+# Embedding graph
+import dwave_networkx as dnx
+S = rbm.networkx_graph
+T = neg_sampler.networkx_graph
+_ = plt.figure(figsize=(8,8))
+dnx.draw_pegasus_embedding(T,neg_sampler.embedding,S,node_size=10)

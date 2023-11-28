@@ -54,6 +54,26 @@ def plot_embeddings(directory,label,solver_graph):
         _ = plt.figure(figsize=(16,16))
         dnx.draw_pegasus_embedding(solver_graph,emb,S,node_size=10)
 
+def plot_batch_embeddings(directory,label,solver_graph):
+
+    abspath = os.path.abspath(f'../{directory}')
+    if not os.path.isdir(abspath): print(f"Not found: {abspath}"); return
+
+    for seed in os.listdir(abspath):
+        emb_filepath = f"{abspath}/{seed}/embedding.pt"
+
+        if seed.isnumeric():
+            if os.path.exists(emb_filepath): emb = torch.load(emb_filepath)
+            else: continue
+
+        graph_filepath = f"{abspath}/{seed}/graph.pt"
+        if os.path.exists(graph_filepath):
+            if os.path.exists(graph_filepath): S = torch.load(f"{abspath}/{seed}/graph.pt")
+            else: S = None
+
+        _ = plt.figure(figsize=(16,16))
+        dnx.draw_pegasus_embedding(solver_graph,emb,S,node_size=10)
+
 ######################### Heuristic and Systematic #############################
 EXPERIMENT = "Embedding-Heuristic_64x64"
 SOLVER_NAME = "Advantage_system4.1"

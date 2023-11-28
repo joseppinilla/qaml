@@ -31,6 +31,6 @@ _ = plt.figure()
 for i,emb in enumerate(batch_embeddings):
     kwargs = {'unused_color':(0.9,0.9,0.9,1//(1+i)),'node_size':20}
     dnx.draw_pegasus_embedding(T,emb,S,**kwargs)
-    _,_, batch_L = miner.quality_key(emb)
-    title.append({batch_L[i]:batch_L[i+1] for i in range(0,len(sys_L),2)})
+    # _,_, batch_L = miner.quality_key(emb)
+    # title.append({batch_L[i]:batch_L[i+1] for i in range(0,len(sys_L),2)})
 plt.title(title)

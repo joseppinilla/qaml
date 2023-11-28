@@ -4,8 +4,8 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-def plot_compare(plot_data,metric):
-    _ = plt.figure()
+def plot_compare(plot_data,metric,epochs=-1,**fig_kwargs):
+    _ = plt.figure(**fig_kwargs)
     metric,value_name = metric
     for (directory,label) in plot_data:
         abspath = os.path.abspath(f'../{directory}')
@@ -13,10 +13,9 @@ def plot_compare(plot_data,metric):
         logs = []
         for seed in os.listdir(abspath):
             filepath = f"{abspath}/{seed}/{metric}.pt"
-            print(f"Checking: {filepath}")
             if seed.isnumeric():
                 if os.path.exists(filepath):
-                    logs.append(torch.load(filepath))
+                    logs.append(torch.load(filepath)[:epochs])
         # Create DataFrame and aggreegate
         df = pd.DataFrame(logs)
         df = df.T.rename_axis('Epoch').reset_index()
@@ -30,20 +29,47 @@ def plot_compare(plot_data,metric):
     plt.legend(framealpha=0.5)
 
 ################################# BM BAS #################################
-EXPERIMENT = "BM_BAS"
-SUBDIR = "2_BM/bas"
-METRICS = [#("err_log_10","Reconstruction Error"),
-            ("p_log_10","Precision"),
-            ("r_log_10","Recall"),
-            ("score_log_10","Score"),]
+EXPERIMENT = "BM_BAS_SA"
+SA_SUBDIR = "2_BM/bas"
+METRICS = [#("err_log","Reconstruction Error"),
+            ("p_log","Precision"),
+            ("r_log","Recall"),
+            ("score_log","Score"),]
 
-PLOT_DATA = [(f'{SUBDIR}/bm36_16-10_100/full/','Full'),
-             (f'{SUBDIR}/bm36_16-10_100/0.8/','0.8'),
-             (f'{SUBDIR}/bm36_16-10_100/0.7/','0.7'),]
+# bm{V}_{H}-{TRAIN_READS}_{NUM_SWEEPS}
+PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_1000/full/','SA 1.0'),
+             (f'{SA_SUBDIR}/bm36_16-10_1000/0.8/','SA 0.8'),
+             (f'{SA_SUBDIR}/bm36_16-10_1000/0.7/','SA 0.7'),
+             (f'{SA_SUBDIR}/bm36_16-100_2000/full/','SA 1.0'),
+             (f'{SA_SUBDIR}/bm36_16-100_2000/0.8/','SA 0.8'),
+             (f'{SA_SUBDIR}/bm36_16-100_2000/0.7/','SA 0.7')]
 
 if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
 for metric,label in METRICS:
-    plot_compare(PLOT_DATA,(metric,label))
+    plot_compare(PLOT_DATA,(metric,label),50,figsize=(8,8))
+    plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
+
+################################# BM BAS #################################
+EXPERIMENT = "BM_BAS"
+SA_SUBDIR = "2_BM/bas"
+QA_SUBDIR = "4_QABM/bas"
+METRICS = [#("err_log","Reconstruction Error"),
+            ("p_log","Precision"),
+            ("r_log","Recall"),
+            ("score_log","Score"),]
+
+# bm{V}_{H}-{TRAIN_READS}_{NUM_SWEEPS}
+PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_2000/full/','SA 1.0'),
+             (f'{SA_SUBDIR}/bm36_16-10_2000/0.8/','SA 0.8'),
+             (f'{SA_SUBDIR}/bm36_16-10_2000/0.7/','SA 0.7'),
+             (f'{QA_SUBDIR}/bm36_16-100/full/','QA 1.0'),
+             (f'{QA_SUBDIR}/bm36_16-100/0.8/','QA 0.8'),
+             (f'{QA_SUBDIR}/bm36_16-100/0.7/','QA 0.7')]
+
+if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
+for metric,label in METRICS:
+    plot_compare(PLOT_DATA,(metric,label),50,figsize=(8,8))
+    plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
 
 
 ################################# BM OptDigits #################################

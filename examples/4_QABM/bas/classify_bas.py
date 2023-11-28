@@ -64,7 +64,7 @@ elif TYPE == "heur":
 elif TYPE == "pruned":
     pass
 
-TRAIN_BATCH
+
 #################################### Input Data ################################
 bas_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
 set_label,get_label = qaml.datasets._embed_labels(bas_dataset,setter_getter=True)

@@ -1,4 +1,4 @@
-# # Classical BM training on the Bars-And-Stripes Dataset for Reconstruction
+# # Classical BM training on the Bars-And-Stripes Dataset
 # Developed by: Jose Pinilla
 
 # Required packages
@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as torch_transforms
 
 ################################# Hyperparameters ##############################
-EPOCHS = 100
+EPOCHS = 50
 M,N = SHAPE = (6,6)
 DATA_SIZE = N*M
 SUBCLASSES = [1,2]
@@ -22,8 +22,8 @@ learning_rate = 0.1
 weight_decay = 1e-4
 momentum = 0.5
 
-TRAIN_READS = 10
-
+TRAIN_READS = 100
+NUM_SWEEPS = 2000
 #################################### Input Data ################################
 train_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
 set_label,get_label = qaml.datasets._embed_labels(train_dataset,
@@ -89,9 +89,9 @@ for t in range(EPOCHS):
         input_data = img_batch.view(1,-1)
 
         # Positive Phase
-        v0, h0 = sa_sampler(input_data.detach(),num_reads=TRAIN_READS)
+        v0, h0 = sa_sampler(input_data.detach(),num_sweeps=NUM_SWEEPS,num_reads=TRAIN_READS)
         # Negative Phase
-        vk, hk = sa_sampler(num_reads=TRAIN_READS)
+        vk, hk = sa_sampler(num_sweeps=NUM_SWEEPS,num_reads=TRAIN_READS)
 
         # Reconstruction error from Contrastive Divergence
         err = ML.apply(sa_sampler,(v0,h0),(vk,hk), *bm.parameters())
@@ -124,14 +124,14 @@ for t in range(EPOCHS):
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-directory = f"bm{VISIBLE_SIZE}_{HIDDEN_SIZE}-10_100/{prune}"
+directory = f"bm{VISIBLE_SIZE}_{HIDDEN_SIZE}-{TRAIN_READS}_{NUM_SWEEPS}/{prune}"
 os.makedirs(f'{directory}/{SEED}',exist_ok=True)
 print(directory,SEED)
-torch.save(err_log,f'{directory}/{SEED}/err_log_{TRAIN_READS}.pt')
-torch.save(p_log,f'{directory}/{SEED}/p_log_{TRAIN_READS}.pt')
-torch.save(r_log,f'{directory}/{SEED}/r_log_{TRAIN_READS}.pt')
-torch.save(score_log,f'{directory}/{SEED}/score_log_{TRAIN_READS}.pt')
-torch.save(epoch_err_log,f'{directory}/{SEED}/epoch_err_log_{TRAIN_READS}.pt')
+torch.save(err_log,f'{directory}/{SEED}/err_log.pt')
+torch.save(p_log,f'{directory}/{SEED}/p_log.pt')
+torch.save(r_log,f'{directory}/{SEED}/r_log.pt')
+torch.save(score_log,f'{directory}/{SEED}/score_log.pt')
+torch.save(epoch_err_log,f'{directory}/{SEED}/epoch_err_log.pt')
 
 # Samples
 fig,axs = plt.subplots(4,4)

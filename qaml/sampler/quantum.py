@@ -7,6 +7,7 @@ import dwave.embedding
 import dwave.preprocessing
 
 import numpy as np
+import networkx as nx
 import dwave_networkx as dnx
 
 from dwave.preprocessing import ScaleComposite
@@ -170,7 +171,7 @@ class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
 
 BatchQASampler = BatchQuantumAnnealingNetworkSampler
 
-class AdachiQASampler(QuantumAnnealingNetworkSampler):
+class AdachiQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
     """ Prune (currently unpruned) units in a tensor from D-Wave graph using the
     method in [1-2]. Prune only disconnected edges.
 
@@ -225,3 +226,161 @@ class AdachiQASampler(QuantumAnnealingNetworkSampler):
             return dnx.chimera_graph(*shape)
         else:
             raise RuntimeError("Sampler `topology_type` not compatible.")
+
+AdachiQASampler = AdachiQuantumAnnealingNetworkSampler
+
+class AdaptiveQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
+    def __init__(self, model, embedding=None, mask=None, auto_scale=True,
+                 beta=1.0, failover=False, retry_interval=-1, test=False, **config):
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
+
+        self.auto_scale = auto_scale
+        self.device = self.get_device(failover,retry_interval,**config)
+
+        template_graph = self.get_template_graph()
+
+        if embedding is None:
+            # Try biclique if RBM
+            if 'Restricted' in str(model):
+                embedding = qaml.minor.biclique_from_cache(model,template_graph,mask)
+            # Try clique otherwise and if biclique fails
+            if not embedding:
+                embedding = qaml.minor.clique_from_cache(model,template_graph,mask)
+            assert embedding, "Embedding not found"
+
+        # Embedded structures have some useful methods
+        edgelist = template_graph.edges
+        embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
+
+        ########################################################################
+
+        # Find "best" subchain (i.e longest) and assign node to it.
+        new_embedding = {}
+        for x in embedding:
+            emb_x = embedding[x]
+            chain_edges = embedding._chain_edges[x]
+            # Very inneficient but does the job of creating chain subgraphs
+            chain_graph = nx.Graph()
+            chain_graph.add_nodes_from([v for v in emb_x if self.networkx_graph.has_node(v)])
+            chain_graph.add_edges_from([(emb_x[i],emb_x[j]) for i,j in chain_edges if self.networkx_graph.has_edge(emb_x[i],emb_x[j])])
+            chain_subgraphs = [(len(c),chain_graph.subgraph(c)) for c in nx.connected_components(chain_graph)]
+
+            if len(chain_subgraphs)>1:
+                l,subgraph = max(chain_subgraphs,key=lambda l_chain: l_chain[0])
+                new_embedding[x] = list(subgraph.nodes)
+            elif len(chain_subgraphs)==1:
+                new_embedding[x] = list(chain_graph.nodes)
+            else:
+                raise RuntimeError(f"No subgraphs were found for chain: {x}")
+
+        self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
+
+        ########################################################################
+
+        child = DummySampler(self.device) if test else self.device
+        self.child = SpinReversalTransformComposite(
+                        FixedEmbeddingComposite(
+                            ScaleComposite(child),
+                            self.embedding,scale_aware=True))
+
+    def get_template_graph(self):
+        topology_type = self.device.properties['topology']['type']
+        shape = self.device.properties['topology']['shape']
+        if topology_type == 'zephyr':
+            return dnx.zephyr_graph(*shape)
+        elif topology_type == 'pegasus':
+            return dnx.pegasus_graph(*shape)
+        elif topology_type == 'chimera':
+            return dnx.chimera_graph(*shape)
+        else:
+            raise RuntimeError("Sampler `topology_type` not compatible.")
+
+AdaptiveQASampler = AdaptiveQuantumAnnealingNetworkSampler
+
+class RepurposeQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
+    def __init__(self, model, embedding=None, mask=None, auto_scale=True,
+                 beta=1.0, failover=False, retry_interval=-1, test=False, **config):
+        BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
+
+        self.auto_scale = auto_scale
+        self.device = self.get_device(failover,retry_interval,**config)
+
+        template_graph = self.get_template_graph()
+
+        if embedding is None:
+            # Try biclique if RBM
+            if 'Restricted' in str(model):
+                embedding = qaml.minor.biclique_from_cache(model,template_graph,mask)
+            # Try clique otherwise and if biclique fails
+            if not embedding:
+                embedding = qaml.minor.clique_from_cache(model,template_graph,mask)
+            assert embedding, "Embedding not found"
+
+        # Embedded structures have some useful methods
+        edgelist = template_graph.edges
+        embedding = dwave.embedding.EmbeddedStructure(edgelist,embedding)
+
+        ########################################################################
+
+        # Find all subchains and create new hidden units where possible
+        model_size = model.V+model.H
+        new_embedding = {}
+        for x in embedding:
+            emb_x = embedding[x]
+            chain_edges = embedding._chain_edges[x]
+            # Very inneficient but does the job of creating chain subgraphs
+            chain_graph = nx.Graph()
+            chain_graph.add_nodes_from([v for v in emb_x if self.networkx_graph.has_node(v)])
+            chain_graph.add_edges_from([(emb_x[i],emb_x[j]) for i,j in chain_edges if self.networkx_graph.has_edge(emb_x[i],emb_x[j])])
+            chain_subgraphs = [(len(c),chain_graph.subgraph(c)) for c in nx.connected_components(chain_graph)]
+
+            if len(chain_subgraphs)>1:
+                # Visible nodes
+                if x<model.V:
+                    l,subgraph = max(chain_subgraphs,key=lambda l_chain: l_chain[0])
+                    new_embedding[x] = list(subgraph.nodes)
+                # Hidden nodes
+                else:
+                    length,subgraph = chain_subgraphs[0]
+                    new_embedding[x] = subgraph.nodes
+                    for length,subgraph in chain_subgraphs[1:]:
+                        new_x = model_size
+                        new_embedding[new_x] = list(subgraph.nodes)
+                        model_size+=1
+
+            elif len(chain_subgraphs)==1:
+                new_embedding[x] = list(chain_graph.nodes)
+            else:
+                raise RuntimeError(f"No subgraphs were found for chain: {x}")
+
+        # Modify model to include new hidden nodes
+        new_H = model_size-model.V
+        if new_H>model.H:
+            print(f"Added {new_H-model.H} hidden nodes")
+            model.H = new_H
+            model.c.data = torch.zeros(model.H)
+            model.W.data = torch.randn(new_H,model.V)
+
+        self.embedding = dwave.embedding.EmbeddedStructure(self.networkx_graph.edges,new_embedding)
+
+        ########################################################################
+
+        child = DummySampler(self.device) if test else self.device
+        self.child = SpinReversalTransformComposite(
+                        FixedEmbeddingComposite(
+                            ScaleComposite(child),
+                            self.embedding,scale_aware=True))
+
+    def get_template_graph(self):
+        topology_type = self.device.properties['topology']['type']
+        shape = self.device.properties['topology']['shape']
+        if topology_type == 'zephyr':
+            return dnx.zephyr_graph(*shape)
+        elif topology_type == 'pegasus':
+            return dnx.pegasus_graph(*shape)
+        elif topology_type == 'chimera':
+            return dnx.chimera_graph(*shape)
+        else:
+            raise RuntimeError("Sampler `topology_type` not compatible.")
+
+RepurposeQASampler = RepurposeQuantumAnnealingNetworkSampler
