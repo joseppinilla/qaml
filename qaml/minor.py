@@ -54,8 +54,9 @@ def harvest_heuristic(model, sampler, mask=None, seed=None):
         no other embeddings exist.
     """
     if mask is None: mask = []
+    if mask is True: mask = np.ones(model.V)
     S = model if isinstance(sampler,nx.Graph) else model.to_networkx_graph()
-    fixed_vars = [v for v,m in zip(model.visible,mask) if not m]
+    fixed_vars = [v.item() for v,m in zip(model.visible,mask) if m]
     S.remove_nodes_from(fixed_vars)
     T = sampler if isinstance(sampler,nx.Graph) else sampler.to_networkx_graph()
     Tg = T.copy()

@@ -80,17 +80,19 @@ QASampler = QuantumAnnealingNetworkSampler
 
 class BatchQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
 
+    harvest_method = None
     batch_embeddings = None
 
     def __init__(self, model, batch_embeddings=None, mask=None, auto_scale=True,
-                 beta=1.0, failover=False, retry_interval=-1, test=False, **conf):
+                 beta=1.0, failover=False, retry_interval=-1, test=False,
+                 harvest_method=qaml.minor.harvest_cliques, **conf):
         BinaryQuadraticModelNetworkSampler.__init__(self,model,beta=beta)
 
         self.auto_scale = auto_scale
         self.device = self.get_device(failover,retry_interval,**conf)
 
         if batch_embeddings is None:
-            batch_embeddings = list(qaml.minor.harvest_cliques(model,self,mask))
+            batch_embeddings = list(harvest_method(model,self,mask))
             assert batch_embeddings, "Embedding not found"
         self.embedding = self.combine_embeddings(batch_embeddings)
         self.batch_embeddings = batch_embeddings

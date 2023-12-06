@@ -37,12 +37,8 @@ METRICS = [#("err_log","Reconstruction Error"),
             ("score_log","Score"),]
 
 # bm{V}_{H}-{TRAIN_READS}_{NUM_SWEEPS}
-PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_1000/full/','SA 1.0'),
-             (f'{SA_SUBDIR}/bm36_16-10_1000/0.8/','SA 0.8'),
-             (f'{SA_SUBDIR}/bm36_16-10_1000/0.7/','SA 0.7'),
-             (f'{SA_SUBDIR}/bm36_16-100_2000/full/','SA 1.0'),
-             (f'{SA_SUBDIR}/bm36_16-100_2000/0.8/','SA 0.8'),
-             (f'{SA_SUBDIR}/bm36_16-100_2000/0.7/','SA 0.7')]
+PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_1000/full/','SA sweeps=1000'),
+             (f'{SA_SUBDIR}/bm36_16-100_2000/full/','SA sweeps=2000')]
 
 if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
 for metric,label in METRICS:
@@ -59,18 +55,36 @@ METRICS = [#("err_log","Reconstruction Error"),
             ("score_log","Score"),]
 
 # bm{V}_{H}-{TRAIN_READS}_{NUM_SWEEPS}
-PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_2000/full/','SA 1.0'),
-             (f'{SA_SUBDIR}/bm36_16-10_2000/0.8/','SA 0.8'),
-             (f'{SA_SUBDIR}/bm36_16-10_2000/0.7/','SA 0.7'),
-             (f'{QA_SUBDIR}/bm36_16-100/full/','QA 1.0'),
+PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_1000/full/','SA'),
+             (f'{SA_SUBDIR}/bm36_16-10_1000/0.8/','SA 0.8'),
+             (f'{SA_SUBDIR}/bm36_16-10_1000/0.7/','SA 0.7'),
+             (f'{QA_SUBDIR}/bm36_16-100/full/','QA'),
              (f'{QA_SUBDIR}/bm36_16-100/0.8/','QA 0.8'),
              (f'{QA_SUBDIR}/bm36_16-100/0.7/','QA 0.7')]
 
 if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
 for metric,label in METRICS:
-    plot_compare(PLOT_DATA,(metric,label),50,figsize=(8,8))
+    plot_compare(PLOT_DATA,(metric,label),50,figsize=(6,6))
     plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
 
+################################ BM BAS #################################
+EXPERIMENT = "BM_BAS_SYS_HEUR"
+SA_SUBDIR = "2_BM/bas"
+QA_SUBDIR = "4_QABM/bas"
+METRICS = [#("err_log","Reconstruction Error"),
+            ("p_log","Precision"),
+            ("r_log","Recall"),
+            ("score_log","Score"),]
+
+# bm{V}_{H}-{TRAIN_READS}_{NUM_SWEEPS}
+PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_1000/full/','SA'),
+             (f'{QA_SUBDIR}/bm36_16-100/full/','QA sys'),
+             (f'{QA_SUBDIR}/bm36_16-100/heur/','QA heur'),]
+
+if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
+for metric,label in METRICS:
+    plot_compare(PLOT_DATA,(metric,label),50,figsize=(6,6))
+    plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
 
 ################################# BM OptDigits #################################
 EXPERIMENT = "BM_OptDigits"

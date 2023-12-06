@@ -5,7 +5,7 @@
 import os
 import qaml
 import torch
-SEED = 8
+SEED = 2
 torch.manual_seed(SEED) # For deterministic weights
 
 import matplotlib.pyplot as plt
@@ -31,8 +31,11 @@ HIDDEN_SIZE = 16
 # Specify model with dimensions
 bm = qaml.nn.BM(VISIBLE_SIZE, HIDDEN_SIZE, 'SPIN')
 
-prune = 0.8
+prune = 0.2
+torch.nn.utils.prune.random_unstructured(bm,'vv',prune)
+torch.nn.utils.prune.random_unstructured(bm,'hh',prune)
 torch.nn.utils.prune.random_unstructured(bm,'W',prune)
+
 # Set up optimizer
 optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
@@ -43,6 +46,8 @@ pos_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,mask=True)
 POS_BATCH = len(pos_sampler.batch_embeddings)
 neg_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME)
 NEG_BATCH = len(neg_sampler.batch_embeddings)
+
+print(POS_BATCH,NEG_BATCH)
 
 ML = qaml.autograd.MaximumLikelihood
 
@@ -62,23 +67,6 @@ for batch_img,batch_label in train_loader:
         ax.matshow(img.view(*SHAPE),vmin=0,vmax=1); ax.axis('off')
 plt.tight_layout()
 plt.savefig("dataset.svg")
-
-# PLot batch_embeddings
-import matplotlib.cm
-import dwave_networkx as dnx
-from dwave_networkx.drawing.distinguishable_colors import distinguishable_color_map
-
-plot_batch_embeddings(neg_sampler.batch_embeddings,pos_sampler.to_networkx_graph())
-plt.savefig("./embedding_10.svg")
-
-def plot_batch_embeddings(batch_embeddings,solver_graph):
-
-    batches = {v:list(x for chain in embedding.values() for x in chain) for v,embedding in enumerate(batch_embeddings)}
-    # n = len(batches)
-    # color = distinguishable_color_map(int(n))
-    # chain_color = {v: color(i/n) for i, v in enumerate(batches)}
-    _ = plt.figure(figsize=(16,16))
-    dnx.draw_pegasus_embedding(solver_graph,batches,node_size=10)
 
 ################################### load Model #################################
 # b_log = torch.load(f'{directory}/{SEED}/b_log.pt')
@@ -113,7 +101,7 @@ p_log.append(precision); r_log.append(recall); score_log.append(score)
 print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
 ################################## Model Training ##############################
-for t in range(10):
+for t in range(1):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
@@ -155,7 +143,6 @@ for t in range(10):
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-len(score_log)
 directory = f"bm{VISIBLE_SIZE}_{HIDDEN_SIZE}-{TRAIN_READS}/{prune}"
 os.makedirs(f'{directory}/{SEED}',exist_ok=True)
 
@@ -211,3 +198,69 @@ ax.plot(epoch_err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
 plt.savefig(f"{directory}/{SEED}/epoch_err.svg")
+
+
+# PLot batch_embeddings
+import matplotlib.cm
+import dwave_networkx as dnx
+from dwave_networkx.drawing.distinguishable_colors import distinguishable_color_map
+
+plot_batch_embeddings(neg_sampler.batch_embeddings,pos_sampler.to_networkx_graph())
+plt.savefig("./embedding_10.svg")
+
+def plot_batch_embeddings(batch_embeddings,solver_graph):
+
+    batches = {v:list(x for chain in embedding.values() for x in chain) for v,embedding in enumerate(batch_embeddings)}
+    # n = len(batches)
+    # color = distinguishable_color_map(int(n))
+    # chain_color = {v: color(i/n) for i, v in enumerate(batches)}
+    _ = plt.figure(figsize=(16,16))
+    dnx.draw_pegasus_embedding(solver_graph,batches,node_size=10)
+
+
+import dimod
+import minorminer
+
+S_pos = dimod.to_networkx_graph(pos_sampler.to_qubo({v.item():0 for v in bm.visible}))
+T_pos = pos_sampler.to_networkx_graph()
+miner_pos = minorminer.miner(S_pos,T_pos)
+QK_pos = map(miner_pos.quality_key,pos_sampler.batch_embeddings)
+_,_,CL_pos = zip(*QK_pos)
+
+
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.pyplot as plt
+import numpy as np
+%matplotlib qt
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.computed_zorder=False
+offset = 0
+for QK in CL_pos:
+    ax.bar(QK[0::2], QK[1::2],alpha=0.8,ec='k',zs=offset,zdir='y',zorder=offset)
+    offset+=1
+
+
+for QK in CL_pos:
+    plt.bar(QK[0::2], QK[1::2],alpha=0.5)
+
+
+
+
+
+S_neg = bm.to_networkx_graph()
+T_neg = pos_sampler.to_networkx_graph()
+miner_neg = minorminer.miner(S_neg,T_neg)
+QK_neg = list(map(miner_neg.quality_key,neg_sampler.batch_embeddings))
+_,_,CL_neg = zip(*QK_neg)
+
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.pyplot as plt
+import numpy as np
+%matplotlib qt
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+offset = 0
+for QK in CL_neg:
+    ax.bar(QK[0::2], QK[1::2],alpha=0.8,ec='k',zs=offset,zdir='y')
+    offset+=1

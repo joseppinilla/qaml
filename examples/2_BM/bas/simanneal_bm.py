@@ -5,7 +5,7 @@
 import os
 import qaml
 import torch
-SEED = 42
+SEED = 123
 torch.manual_seed(SEED) # For deterministic weights
 
 import matplotlib.pyplot as plt
@@ -23,7 +23,7 @@ weight_decay = 1e-4
 momentum = 0.5
 
 TRAIN_READS = 100
-NUM_SWEEPS = 2000
+NUM_SWEEPS = 1000
 #################################### Input Data ################################
 train_dataset = qaml.datasets.BAS(*SHAPE,transform=qaml.datasets.ToSpinTensor())
 set_label,get_label = qaml.datasets._embed_labels(train_dataset,
@@ -49,8 +49,10 @@ HIDDEN_SIZE = 16
 # Specify model with dimensions
 bm = qaml.nn.BM(VISIBLE_SIZE, HIDDEN_SIZE, 'SPIN')
 
-prune = "full"
-# torch.nn.utils.prune.random_unstructured(bm,'W',prune)
+prune = 0.1
+torch.nn.utils.prune.random_unstructured(bm,'vv',prune)
+torch.nn.utils.prune.random_unstructured(bm,'hh',prune)
+torch.nn.utils.prune.random_unstructured(bm,'W',prune)
 # Set up optimizer
 optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
                             weight_decay=weight_decay,momentum=momentum)
@@ -73,7 +75,6 @@ W_log = [bm.W.detach().clone().numpy().flatten()]
 vv_log = [bm.vv.detach().clone().numpy().flatten()]
 hh_log = [bm.hh.detach().clone().numpy().flatten()]
 
-
 ################################## Pre-Training ################################
 # BAS score
 vk,_ = sa_sampler(num_reads=TEST_READS)
@@ -82,7 +83,7 @@ p_log.append(precision); r_log.append(recall); score_log.append(score)
 print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
 ################################## Model Training ##############################
-for t in range(EPOCHS):
+for t in range(1):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
@@ -124,9 +125,9 @@ for t in range(EPOCHS):
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-directory = f"bm{VISIBLE_SIZE}_{HIDDEN_SIZE}-{TRAIN_READS}_{NUM_SWEEPS}/{prune}"
+directory = f"bm{VISIBLE_SIZE}__{HIDDEN_SIZE}-{TRAIN_READS}_{NUM_SWEEPS}/{prune}"
 os.makedirs(f'{directory}/{SEED}',exist_ok=True)
-print(directory,SEED)
+
 torch.save(err_log,f'{directory}/{SEED}/err_log.pt')
 torch.save(p_log,f'{directory}/{SEED}/p_log.pt')
 torch.save(r_log,f'{directory}/{SEED}/r_log.pt')
