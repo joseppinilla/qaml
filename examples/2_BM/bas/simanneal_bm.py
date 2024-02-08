@@ -49,9 +49,7 @@ HIDDEN_SIZE = 16
 # Specify model with dimensions
 bm = qaml.nn.BM(VISIBLE_SIZE, HIDDEN_SIZE, 'SPIN')
 
-prune = 0.1
-torch.nn.utils.prune.random_unstructured(bm,'vv',prune)
-torch.nn.utils.prune.random_unstructured(bm,'hh',prune)
+prune = 0.8
 torch.nn.utils.prune.random_unstructured(bm,'W',prune)
 # Set up optimizer
 optimizer = torch.optim.SGD(bm.parameters(), lr=learning_rate,
@@ -77,22 +75,22 @@ hh_log = [bm.hh.detach().clone().numpy().flatten()]
 
 ################################## Pre-Training ################################
 # BAS score
-vk,_ = sa_sampler(num_reads=TEST_READS)
+vk,_ = sa_sampler(num_reads=TEST_READS,num_sweeps=NUM_SWEEPS)
 precision, recall, score = train_dataset.score(((vk+1)/2).view(-1,*SHAPE))
 p_log.append(precision); r_log.append(recall); score_log.append(score)
 print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
 ################################## Model Training ##############################
-for t in range(1):
+for t in range(40):
     kl_div = torch.Tensor([0.])
     epoch_error = torch.Tensor([0.])
     for img_batch,labels_batch in train_loader:
         input_data = img_batch.view(1,-1)
 
         # Positive Phase
-        v0, h0 = sa_sampler(input_data.detach(),num_sweeps=NUM_SWEEPS,num_reads=TRAIN_READS)
+        v0, h0 = sa_sampler(input_data.detach(),num_sweeps=NUM_SWEEPS,num_reads=TRAIN_READS,proposal_acceptance_criteria='Gibbs')
         # Negative Phase
-        vk, hk = sa_sampler(num_sweeps=NUM_SWEEPS,num_reads=TRAIN_READS)
+        vk, hk = sa_sampler(num_sweeps=NUM_SWEEPS,num_reads=TRAIN_READS,proposal_acceptance_criteria='Gibbs')
 
         # Reconstruction error from Contrastive Divergence
         err = ML.apply(sa_sampler,(v0,h0),(vk,hk), *bm.parameters())
@@ -120,12 +118,12 @@ for t in range(1):
     epoch_err_log.append(epoch_error.item())
     print(f"Epoch {t} Reconstruction Error = {epoch_error.item()}")
     # BAS score
-    vk,_ = sa_sampler(num_reads=TEST_READS)
+    vk,_ = sa_sampler(num_reads=TEST_READS,num_sweeps=NUM_SWEEPS)
     precision, recall, score = train_dataset.score(((vk+1)/2).view(-1,*SHAPE))
     p_log.append(precision); r_log.append(recall); score_log.append(score)
     print(f"Precision {precision:.2} Recall {recall:.2} Score {score:.2}")
 
-directory = f"bm{VISIBLE_SIZE}__{HIDDEN_SIZE}-{TRAIN_READS}_{NUM_SWEEPS}/{prune}"
+directory = f"Gibbs_bm{VISIBLE_SIZE}_{HIDDEN_SIZE}-{TRAIN_READS}_{NUM_SWEEPS}/{prune}"
 os.makedirs(f'{directory}/{SEED}',exist_ok=True)
 
 torch.save(err_log,f'{directory}/{SEED}/err_log.pt')

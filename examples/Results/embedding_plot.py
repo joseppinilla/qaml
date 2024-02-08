@@ -27,7 +27,7 @@ def plot_quality(directory,label,solver_graph):
 
         miner = minorminer.miner(S,solver_graph)
         state,O,QK = miner.quality_key(emb)
-        label_i = label + f'_{seed}'
+        label_i = label + f'{seed}'
 
         plt.bar(QK[0::2], QK[1::2],alpha=0.5,label=label_i)
         plt.xlabel('Chain length')
@@ -79,7 +79,7 @@ EXPERIMENT = "Embedding-Heuristic_64x64"
 SOLVER_NAME = "Advantage_system4.1"
 SUBDIR = "3_QARBM/optdigits/64x64"
 PLOT_DATA = [(f'{SUBDIR}/vanilla','Sys'),
-             (f'{SUBDIR}/heuristic','Heur')]
+             (f'{SUBDIR}/heuristic','Heuristic seed=')]
 SOLVER_GRAPH = torch.load(f'./Architectures/{SOLVER_NAME}.pt')
 
 if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
