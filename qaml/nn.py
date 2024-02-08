@@ -117,11 +117,12 @@ class BoltzmannMachine(EnergyBasedModel):
         H (int): The size of the hidden layer.
     """
 
-    def __init__(self, V, H=0, vartype=dimod.BINARY, h=[-.1,.1], J=[-.1,.1]):
+    def __init__(self, V, H=0, vartype=dimod.BINARY,
+                 lin_range=[-.1,.1], quad_range=[-.1,.1]):
         super(BoltzmannMachine, self).__init__(V,H,vartype)
 
-        lin = torch.distributions.uniform.Uniform(*h)
-        quad = torch .distributions.uniform.Uniform(*J)
+        lin = torch.distributions.uniform.Uniform(*lin_range)
+        quad = torch .distributions.uniform.Uniform(*quad_range)
 
         # Visible linear bias
         self.b = torch.nn.Parameter(lin.rsample((V,)),requires_grad=True)
@@ -173,11 +174,12 @@ class RestrictedBoltzmannMachine(EnergyBasedModel):
         H (int): The size of the hidden layer.
     """
 
-    def __init__(self, V, H, vartype=dimod.BINARY, h=[-4,4], J=[-1,1]):
+    def __init__(self, V, H, vartype=dimod.BINARY,
+                 lin_range=[-.1,.1], quad_range=[-.1,.1]):
         super(RestrictedBoltzmannMachine, self).__init__(V,H,vartype)
 
-        lin = torch.distributions.uniform.Uniform(*h)
-        quad = torch .distributions.uniform.Uniform(*J)
+        lin = torch.distributions.uniform.Uniform(*lin_range)
+        quad = torch .distributions.uniform.Uniform(*quad_range)
 
         # Visible linear bias
         self.b = torch.nn.Parameter(lin.rsample((V,)),requires_grad=True)
@@ -285,11 +287,12 @@ class LimitedBoltzmannMachine(EnergyBasedModel):
             H (int): The size of the hidden layer.
     """
 
-    def __init__(self, V, H, vartype=dimod.BINARY, h=[-4,4], J=[-1,1]):
+    def __init__(self, V, H, vartype=dimod.BINARY,
+                 lin_range=[-.1,.1], quad_range=[-.1,.1]):
         super(LimitedBoltzmannMachine, self).__init__(V,H,vartype)
 
-        lin = torch.distributions.uniform.Uniform(*h)
-        quad = torch .distributions.uniform.Uniform(*J)
+        lin = torch.distributions.uniform.Uniform(*lin_range)
+        quad = torch .distributions.uniform.Uniform(*quad_range)
 
         # Visible linear bias
         self.b = torch.nn.Parameter(lin.rsample((V,)),requires_grad=True)

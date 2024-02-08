@@ -179,7 +179,7 @@ class AdachiQuantumAnnealingNetworkSampler(QuantumAnnealingNetworkSampler):
 
     [1] Adachi, S. H., & Henderson, M. P. (2015). Application of Quantum
     Annealing to Training of Deep Neural Networks.
-    https://doi.org/10.1038/nature10012
+    http://arxiv.org/abs/1510.06356
 
     [2] Job, J., & Adachi, S. (2020). Systematic comparison of deep belief
     network training using quantum annealing vs. classical techniques.

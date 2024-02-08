@@ -1,6 +1,6 @@
-import neal
 import torch
 
+from dwave.samplers import SimulatedAnnealingSampler
 from dwave.preprocessing import ScaleComposite
 from qaml.sampler.base import NetworkSampler, BinaryQuadraticModelNetworkSampler
 
@@ -32,6 +32,7 @@ class GibbsNetworkSampler(NetworkSampler):
             >>> prob_vk, prob_hk = neg_sampler(k)
 
     """
+    alpha = 1.0
 
     def __init__(self, model, num_chains, beta=1.0, return_prob=True):
         if 'Restricted' not in repr(model):
@@ -83,7 +84,7 @@ class SimulatedAnnealingNetworkSampler(BinaryQuadraticModelNetworkSampler):
 
     def __init__(self, model, beta=1.0, **kwargs):
         BinaryQuadraticModelNetworkSampler.__init__(self,model,beta)
-        self.child = ScaleComposite(neal.SimulatedAnnealingSampler(**kwargs))
+        self.child = ScaleComposite(SimulatedAnnealingSampler(**kwargs))
 
 SASampler = SimulatedAnnealingNetworkSampler
 
