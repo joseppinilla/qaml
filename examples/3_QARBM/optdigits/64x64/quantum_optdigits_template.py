@@ -21,14 +21,14 @@ TEST_READS = 20
 # Stochastic Gradient Descent
 learning_rate = 0.1
 weight_decay = 1e-4
-momentum = 0.5
+momentum = 0.1
 
-# Set up training mechanisms
+# Sampler parameters
 solver_name = "Advantage_system4.1"
 sampler_kwargs = {'auto_scale':True,'num_spin_reversal_transforms':4}
 
 # Deterministic results
-SEED = 125
+SEED = 134
 _ = torch.manual_seed(SEED)
 
 #################################### Input Data ################################
@@ -62,10 +62,14 @@ optimizer = torch.optim.SGD(rbm.parameters(),lr=learning_rate/beta,
 CD = qaml.autograd.ContrastiveDivergence
 
 # Set up training mechanisms
+pos_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
+
 verbose = True
-method = 'repurpose'
+method = 'classical'
 if method == 'vanilla':
-    neg_sampler = qaml.sampler.QASampler(rbm,beta=beta,solver=solver_name,test=True)
+    # neg_sampler = qaml.sampler.QASampler(rbm,beta=beta,solver=solver_name)
+    neg_sampler = qaml.sampler.BatchQASampler(rbm,beta=beta,solver=solver_name)
+    embedding = neg_sampler.batch_embeddings
 
 elif method == 'adachi':
     neg_sampler = qaml.sampler.AdachiQASampler(rbm,solver=solver_name,beta=beta)
@@ -84,12 +88,21 @@ elif method == 'repurpose':
     neg_sampler = qaml.sampler.RepurposeQASampler(rbm,solver=solver_name,beta=beta)
     _ = qaml.prune.adaptive_unstructured(rbm,'W',neg_sampler,verbose)
 
-# elif method == 'heuristic':
-    # neg_sampler = qaml.sampler.QASampler(rbm,{},beta,solver=solver_name)
-    # neg_sampler.set_embedding(qaml.minor.miner_heuristic(rbm,neg_sampler,SEED))
 
-pos_sampler =  qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
+elif method == 'heuristic':
+    device = qaml.sampler.QASampler.get_device(solver=solver_name)
+    embedding = qaml.minor.miner_heuristic(rbm,device,seed=SEED)
+    neg_sampler = qaml.sampler.QASampler(rbm,embedding,beta=beta,solver=solver_name)
 
+
+if method == 'classical':
+    solver_name = 'Gibbs'
+    neg_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
+    sampler_kwargs = {'k':5}
+    embedding = {}
+else:
+    sampler_kwargs['num_reads'] = BATCH_SIZE
+    embedding = neg_sampler.embedding
 
 ################################## Training Log ################################
 
@@ -97,7 +110,7 @@ directory = f"{method}/{solver_name}/{SEED}"
 os.makedirs(f'{directory}',exist_ok=True)
 
 torch.save(rbm.to_networkx_graph(),f"{directory}/graph.pt")
-torch.save(dict(neg_sampler.embedding),f"{directory}/embedding.pt")
+torch.save(dict(embedding),f"{directory}/embedding.pt")
 torch.save(rbm.state_dict().get('W_mask',{}),f"{directory}/mask.pt")
 
 err_log = []
@@ -124,7 +137,7 @@ print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
 
 ################################## Model Training ##############################
 rbm.train()
-for t in range(1):
+for t in range(5):
     print(f"Epoch {t}")
     epoch_error = torch.Tensor([0.])
     epoch_kl_div = torch.Tensor([0.])
@@ -132,10 +145,11 @@ for t in range(1):
 
         input_data = img_batch.flatten(1)
         # Negative Phase
-        vk, hk = neg_sampler(num_reads=BATCH_SIZE,**sampler_kwargs)
+        vk, hk = neg_sampler(**sampler_kwargs)
 
         # Positive Phase
-        v0, prob_h0 = input_data, rbm(input_data,beta*neg_sampler.alpha)
+        pos_sampler.beta.data = torch.tensor(beta*neg_sampler.alpha)
+        v0, prob_h0 = pos_sampler()
 
         # Reconstruction error from Contrastive Divergence
         err = CD.apply(neg_sampler,(v0,prob_h0), (vk,hk), *rbm.parameters())
@@ -179,7 +193,6 @@ for t in range(1):
     print(f"Testing accuracy: {count}/{tests} ({count/tests:.2f})")
 
 
-
 # %%
 ########################### Save model and results #############################
 torch.save(b_log,f"./{directory}/b.pt")
@@ -196,23 +209,14 @@ plt.plot(accuracy_log)
 plt.ylabel("Testing Accuracy")
 plt.xlabel("Epoch")
 
-
 # KL-Divergence
 fig, ax = plt.subplots()
 plt.plot(kl_div_log)
 plt.ylabel("KL Divergence")
 plt.xlabel("Epoch")
 
-
 # Error graph
 fig, ax = plt.subplots()
 plt.plot(err_log)
 plt.ylabel("Reconstruction Error")
 plt.xlabel("Epoch")
-
-# Embedding graph
-import dwave_networkx as dnx
-S = rbm.networkx_graph
-T = neg_sampler.networkx_graph
-_ = plt.figure(figsize=(8,8))
-dnx.draw_pegasus_embedding(T,neg_sampler.embedding,S,node_size=10)
