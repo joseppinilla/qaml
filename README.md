@@ -6,6 +6,16 @@ integration with Pytorch models.
 This compatibility and modularity is what makes possible the use of Quantum Processing Units to accelerate
 the sampling process required in generative models.
 
+# QAML Configurations:
+
+- Classic Restricted Boltzmann Machine (RBM)
+
+- Quantum-Assisted Restricted Boltzmann Machine (QARBM)
+
+- Classic Boltzmann Machine (BM)
+
+- Quantum-Assisted Boltzmann Machine (QABM)
+
 # References:
 
 I want to acknowledge the projects I used as inspiration for QAML.
