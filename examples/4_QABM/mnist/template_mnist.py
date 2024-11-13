@@ -37,17 +37,6 @@ HIDDEN_SIZE = 7
 # Specify model with dimensions
 bm = qaml.nn.BoltzmannMachine(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
 
-# Initialize biases
-_ = torch.nn.init.uniform_(bm.b,-4.0,4.0)
-_ = torch.nn.init.uniform_(bm.c,-4.0,4.0)
-_ = torch.nn.init.uniform_(bm.vv,-1.0,1.0)
-_ = torch.nn.init.uniform_(bm.hh,-1.0,1.0)
-_ = torch.nn.init.uniform_(bm.W,-1.0,1.0)
-
-# torch.nn.utils.prune.random_unstructured(bm,'W',0.9)
-# torch.nn.utils.prune.random_unstructured(bm,'vv',0.9)
-# torch.nn.utils.prune.random_unstructured(bm,'hh',0.9)
-
 # Set up optimizer
 optimizer = torch.optim.SGD(bm.parameters(),lr=learning_rate,
                             weight_decay=weight_decay,

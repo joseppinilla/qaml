@@ -42,6 +42,8 @@ POS_BATCH = len(pos_sampler.batch_embeddings)
 neg_sampler = qaml.sampler.BatchQASampler(bm,solver=SOLVER_NAME,harvest_method=qaml.minor.harvest_heuristic)
 NEG_BATCH = len(neg_sampler.batch_embeddings)
 
+print(POS_BATCH,NEG_BATCH)
+
 ML = qaml.autograd.MaximumLikelihood
 
 #################################### Input Data ################################
@@ -205,19 +207,22 @@ def plot_batch_embeddings(batch_embeddings,solver_graph):
     # color = distinguishable_color_map(int(n))
     # chain_color = {v: color(i/n) for i, v in enumerate(batches)}
     _ = plt.figure(figsize=(16,16))
-    dnx.draw_pegasus_embedding(solver_graph,batches,node_size=10)
+    dnx.draw_pegasus_embedding(solver_graph,batches,node_size=10,interaction_edges=[])
 
 
 plot_batch_embeddings(pos_sampler.batch_embeddings,pos_sampler.to_networkx_graph())
 plt.savefig("./embedding_heur_pos_98.svg")
+plt.savefig("./embedding_heur_pos_98.png")
 
 plot_batch_embeddings(neg_sampler.batch_embeddings,neg_sampler.to_networkx_graph())
 plt.savefig("./embedding_heur_neg_09.svg")
+plt.savefig("./embedding_heur_neg_09.png")
 
 
 
 import dimod
 import minorminer
+%matplotlib qt
 
 S_pos = dimod.to_networkx_graph(pos_sampler.to_qubo({v.item():0 for v in bm.visible}))
 T_pos = pos_sampler.to_networkx_graph()
@@ -225,26 +230,25 @@ miner_pos = minorminer.miner(S_pos,T_pos)
 QK_pos = map(miner_pos.quality_key,pos_sampler.batch_embeddings)
 _,_,CL_pos = zip(*QK_pos)
 
-
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
-import numpy as np
-%matplotlib qt
 fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.computed_zorder=True
-offset = 0
+ax = plt.gca()
+QK_dict = {}
 for QK in CL_pos:
-    ax.bar(QK[0::2], QK[1::2],alpha=0.8,ec='k',zs=offset,zdir='y')
-    offset+=1
-
-
-for QK in CL_pos:
-    plt.bar(QK[0::2], QK[1::2],alpha=0.5)
-
-
-
-
+    keys = QK[0::2]
+    vals = QK[1::2]
+    for k,v in zip(keys,vals):
+        QK_dict[k] = QK_dict.get(k,[v]) + [v]
+K,V = zip(*sorted(zip(QK_dict.keys(),QK_dict.values())))
+bplot = ax.boxplot(V,labels=K,patch_artist=True,showmeans=True,whis=1.0)
+ax.set_xlabel('Chain length')
+ax.set_ylabel('Count')
+ax.yaxis.grid(True)
+for line in bplot['medians']:
+    line.set_linewidth(2)
+    line.set_color('#7f7f7f')
+for line in bplot['means']:
+    line.set_markeredgecolor('#7f7f7f')
+    line.set_markerfacecolor('#7f7f7f')
 
 S_neg = bm.to_networkx_graph()
 T_neg = pos_sampler.to_networkx_graph()
@@ -252,13 +256,22 @@ miner_neg = minorminer.miner(S_neg,T_neg)
 QK_neg = list(map(miner_neg.quality_key,neg_sampler.batch_embeddings))
 _,_,CL_neg = zip(*QK_neg)
 
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
-import numpy as np
-%matplotlib qt
 fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-offset = 0
+ax = plt.gca()
+QK_dict = {}
 for QK in CL_neg:
-    ax.bar(QK[0::2], QK[1::2],alpha=0.8,ec='k',zs=offset,zdir='y')
-    offset+=1
+    keys = QK[0::2]
+    vals = QK[1::2]
+    for k,v in zip(keys,vals):
+        QK_dict[k] = QK_dict.get(k,[v]) + [v]
+K,V = zip(*sorted(zip(QK_dict.keys(),QK_dict.values())))
+bplot = ax.boxplot(V,labels=K,patch_artist=True,showmeans=True,whis=1.0)
+ax.set_xlabel('Chain strength')
+ax.set_ylabel('Count')
+ax.yaxis.grid(True)
+for line in bplot['medians']:
+    line.set_linewidth(2)
+    line.set_color('#7f7f7f')
+for line in bplot['means']:
+    line.set_markeredgecolor('#7f7f7f')
+    line.set_markerfacecolor('#7f7f7f')

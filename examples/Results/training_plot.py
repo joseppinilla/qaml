@@ -4,7 +4,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-def plot_compare(plot_data,metric,epochs=-1,**fig_kwargs):
+def plot_compare(plot_data,metric,epochs=-1,ylim=None,**fig_kwargs):
     _ = plt.figure(**fig_kwargs)
     metric,value_name = metric
     for (directory,label) in plot_data:
@@ -24,29 +24,14 @@ def plot_compare(plot_data,metric,epochs=-1,**fig_kwargs):
                      var_name="seed",
                      value_name=value_name)
 
-        sns.lineplot(x="Epoch",y=value_name,data=df,ci="sd",label=label,
+        lp = sns.lineplot(x="Epoch",y=value_name,data=df,errorbar="se",label=label,
                      err_kws={"alpha":0.15})
+        if ylim:
+            lp.set(ylim=ylim)
     plt.legend(framealpha=0.5)
 
 ################################# BM BAS #################################
 EXPERIMENT = "BM_BAS_SA"
-SA_SUBDIR = "2_BM/bas"
-METRICS = [#("err_log","Reconstruction Error"),
-            ("p_log","Precision"),
-            ("r_log","Recall"),
-            ("score_log","Score"),]
-
-# bm{V}_{H}-{TRAIN_READS}_{NUM_SWEEPS}
-PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_1000/full/','SA sweeps=1000'),
-             (f'{SA_SUBDIR}/bm36_16-100_2000/full/','SA sweeps=2000')]
-
-if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
-for metric,label in METRICS:
-    plot_compare(PLOT_DATA,(metric,label),50,figsize=(8,8))
-    plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
-
-################################# BM BAS #################################
-EXPERIMENT = "BM_BAS"
 SA_SUBDIR = "2_BM/bas"
 QA_SUBDIR = "4_QABM/bas"
 METRICS = [#("err_log","Reconstruction Error"),
@@ -57,10 +42,10 @@ METRICS = [#("err_log","Reconstruction Error"),
 # bm{V}_{H}-{TRAIN_READS}_{NUM_SWEEPS}
 PLOT_DATA = [(f'{SA_SUBDIR}/bm36_16-10_1000/full/','SA'),
              (f'{SA_SUBDIR}/bm36_16-10_1000/0.8/','SA 0.8'),
-             (f'{SA_SUBDIR}/bm36_16-10_1000/0.7/','SA 0.7'),
-             (f'{QA_SUBDIR}/bm36_16-100/full/','QA'),
-             (f'{QA_SUBDIR}/bm36_16-100/0.8/','QA 0.8'),
-             (f'{QA_SUBDIR}/bm36_16-100/0.7/','QA 0.7')]
+             (f'{SA_SUBDIR}/bm36_16-10_1000/0.7/','SA 0.7'),]
+             # (f'{QA_SUBDIR}/bm36_16-100/full/','QA'),
+             # (f'{QA_SUBDIR}/bm36_16-100/0.8/','QA 0.8'),
+             # (f'{QA_SUBDIR}/bm36_16-100/0.7/','QA 0.7')]
 
 if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
 for metric,label in METRICS:
@@ -98,6 +83,7 @@ PLOT_DATA = [(f'{SUBDIR}/heur/16_batch84','Heuristic'),
 if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
 for metric,label in METRICS:
     plot_compare(PLOT_DATA,(metric,label))
+    plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
 
 ####################### BM Complete vs Heuristic BAS ###########################
 EXPERIMENT = "BM_Complete_v_Heuristic"
@@ -142,13 +128,28 @@ for metric,label in METRICS:
     plot_compare(PLOT_DATA,(metric,label))
     plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
 
+
+################################## Adaptive ####################################
+EXPERIMENT = "RBM_Adaptive"
+SUBDIR = "3_QARBM/optdigits/64x64"
+METRICS = [('accuracy','Testing Accuracy'),('kl_div','KL Divergence'),('err','Error')]
+PLOT_DATA = [(f'{SUBDIR}/vanilla/Gibbs',   'Biclique'),
+             (f'{SUBDIR}/adachi/Gibbs',    '24 edges pruned'),
+             (f'{SUBDIR}/adaptive/Gibbs',  '52 edges pruned'),]
+             # (f'{SUBDIR}/repurpose/Gibbs', '104 edges pruned + 1 hidden node')]
+
+if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")
+for metric,label in METRICS:
+    plot_compare(PLOT_DATA,(metric,label))
+    plt.savefig(f'./{EXPERIMENT}/{metric}.svg')
+
 ######################### RBM Complete vs Heuristic ############################
-EXPERIMENT = "RBM_Complete_v_Heuristic"
+EXPERIMENT = "RBM_Systematic_v_Heuristic"
 SUBDIR = "3_QARBM/optdigits/64x64"
 METRICS = [('accuracy','Testing Accuracy'),
             ("err","Reconstruction Error"),]
 
-PLOT_DATA = [(f'{SUBDIR}/vanilla','Complete'),
+PLOT_DATA = [(f'{SUBDIR}/vanilla','Systematic'),
              (f'{SUBDIR}/heuristic','Heuristic')]
 
 if not os.path.exists(f"./{EXPERIMENT}/"): os.makedirs(f"./{EXPERIMENT}/")

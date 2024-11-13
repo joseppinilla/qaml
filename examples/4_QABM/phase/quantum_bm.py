@@ -28,13 +28,6 @@ VISIBLE_SIZE = DATA_SIZE + LABEL_SIZE
 HIDDEN_SIZE = 8
 bm = qaml.nn.BoltzmannMachine(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
 
-# Initialize biases
-_ = torch.nn.init.uniform_(bm.b,-4.0,4.0)
-_ = torch.nn.init.uniform_(bm.c,-4.0,4.0)
-_ = torch.nn.init.uniform_(bm.vv,-1.0,1.0)
-_ = torch.nn.init.uniform_(bm.hh,-1.0,1.0)
-_ = torch.nn.init.uniform_(bm.W,-1.0,1.0)
-
 # Set up optimizer
 optimizer = torch.optim.SGD(bm.parameters(),lr=learning_rate,
                             weight_decay=weight_decay,

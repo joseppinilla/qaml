@@ -8,11 +8,13 @@ import networkx as nx
 import dwave_networkx as dnx
 import matplotlib.pyplot as plt
 
+torch.manual_seed(42)
+
 np.set_printoptions(precision=2)
 torch.set_printoptions(precision=2)
 matplotlib.rc('text.latex', preamble=r'\usepackage{amsmath}')
 
-def plot_joint_samplesets(sampleset, shape, figsize=None):
+def plot_joint_samplesets(sampleset, shape, dataset=[], figsize=None):
     # Use shape to find size of the graph
     horizontal,vertical = shape
     maxX, maxY = 2**(horizontal)-1, 2**(vertical)-1
@@ -58,22 +60,54 @@ def plot_joint_samplesets(sampleset, shape, figsize=None):
     ax.scatter(*zip(*minXY),s=100,linewidths=1,c='silver',marker='x')
     ax.set_xlim(0,1)
     ax.set_ylim(0,1)
+    # Plot dataset lines
+    for datum in dataset:
+        value = ''.join(str(int(v.item())) for v in datum)
+        x_point = bin_to_gray_index(value)
+        ax.axvline(x=x_point/maxX)
+
     # Plot colorbar
     plt.subplots_adjust(top=.9,bottom=0.1,left=0.1,right=.9,hspace=0,wspace=0)
     cax = fig.add_axes([0.93,0.2,0.01,0.6]) # [left,bottom,width,height]
-    cbar = plt.colorbar(sct,orientation='vertical',cax=cax, extend='neither')
+    cbar = plt.colorbar(sct,orientation='vertical',cax=cax,extend='neither',
+                        ticks=[minE,minE + (maxE-minE)/2,maxE])
+
+    return
 
 ################################################################################
 ################################################################################
 SHAPE = (36,16)
-bm = qaml.nn.BoltzmannMachine(*SHAPE)
+bm = qaml.nn.BoltzmannMachine(*SHAPE,lin_range=[-4,4],quad_range=[-1,1])
+
+# bm.b.data = torch.Tensor(np.array(torch.load("../../4_QABM/bas/bm36_16-100/full/8/b_log.pt")))[0]
+# bm.c.data = torch.Tensor(np.array(torch.load("../../4_QABM/bas/bm36_16-100/full/8/c_log.pt")))[0]
+# bm.vv.data = torch.Tensor(np.array(torch.load("../../4_QABM/bas/bm36_16-100/full/8/vv_log.pt")))[0]
+# bm.hh.data = torch.Tensor(np.array(torch.load("../../4_QABM/bas/bm36_16-100/full/8/hh_log.pt")))[0]
+# bm.W.data = torch.Tensor(np.array(torch.load("../../4_QABM/bas/bm36_16-100/full/8/W_log.pt")))[0].view(16,36)
+# dataset = train_dataset.data.view(-1,36)
+
+################################################################################
+################################################################################
 sa_sampler = qaml.sampler.SimulatedAnnealingNetworkSampler(bm)
 sa_kwargs = {'num_sweeps':100,'proposal_acceptance_criteria':"Gibbs"}
 vk,hk = sa_sampler(num_reads=10000,seed=42,**sa_kwargs)
 plot_joint_samplesets(sa_sampler.sampleset,SHAPE)
-plt.savefig('sa_landscape.svg')
+# plt.savefig('sa_landscape_data.svg')
+
 
 solver = qaml.sampler.ExactNetworkSampler(bm)
 _ = solver.get_energies()
 plot_joint_samplesets(solver.sampleset,SHAPE)
 plt.savefig('exact_landscape.svg')
+
+qa_sampler = qaml.sampler.QASampler(bm,solver="Advantage_system4.1")
+qa_kwargs = {'num_spin_reversal_transforms':4,'auto_scale':True}
+vq,hq = qa_sampler(num_reads=2500,**qa_kwargs)
+plot_joint_samplesets(qa_sampler.sampleset,SHAPE)
+# plt.savefig('qa_landscape_data.svg')
+
+qa2_sampler = qaml.sampler.QASampler(bm,solver="Advantage2_prototype2.2")
+qa2_kwargs = {'num_spin_reversal_transforms':4,'auto_scale':True}
+v2,h2 = qa2_sampler(num_reads=2500,**qa_kwargs)
+plot_joint_samplesets(qa2_sampler.sampleset,SHAPE)
+# plt.savefig('qa2_landscape_data.svg')

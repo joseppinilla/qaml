@@ -24,7 +24,8 @@ weight_decay = 1e-4
 momentum = 0.1
 
 # Sampler parameters
-solver_name = "Advantage_system4.1"
+solver_name = "Advantage2_prototype2.2"
+# solver_name = "Advantage_system4.1"
 sampler_kwargs = {'auto_scale':True,'num_spin_reversal_transforms':4}
 
 # Deterministic results
@@ -48,7 +49,7 @@ set_label,get_label = qaml.datasets._embed_labels(opt_test,encoding='one_hot',
 
 ################################# Model Definition #############################
 VISIBLE_SIZE = M*N
-HIDDEN_SIZE = 64
+HIDDEN_SIZE = 16
 
 # Specify model with dimensions
 rbm = qaml.nn.RBM(VISIBLE_SIZE,HIDDEN_SIZE,'SPIN')
@@ -65,7 +66,7 @@ CD = qaml.autograd.ContrastiveDivergence
 pos_sampler = qaml.sampler.GibbsNetworkSampler(rbm,BATCH_SIZE)
 
 verbose = True
-method = 'classical'
+method = 'vanilla'
 if method == 'vanilla':
     # neg_sampler = qaml.sampler.QASampler(rbm,beta=beta,solver=solver_name)
     neg_sampler = qaml.sampler.BatchQASampler(rbm,beta=beta,solver=solver_name)
